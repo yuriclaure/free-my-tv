@@ -4,74 +4,53 @@
 
 # Free My TV
 
-**A fast, ad-free home screen for Google TV, LG and Samsung TVs.**
+**A fast, ad-free home screen for Google TV and Android TV, tuned for the living room.**
 
-Trending picks from your own apps, the weather at a glance, and a look that follows the sunset.<br>
-Open source. Built with Claude Code. One button to undo.
+Your apps on a light shelf, what you're halfway through (Netflix included), trending picks, the weather for the day and the week,<br>
+and Apple's aerial videos as the screensaver. Open source. Built with Claude Code. One button to undo.
 
-[**freemytv.io**](https://freemytv.io) · [Install](#install) · [LG TVs](#lg-tvs-webos) · [Samsung TVs](#samsung-tvs-tizen) · [Any TV](#any-tv) · [Make it yours](#make-it-yours)
+[Install](#install) · [What's new](#whats-new-in-this-version) · [Settings](#settings) · [Going back](#going-back) · [Make it yours](#make-it-yours)
 
-<img src=".github/preview.webp" width="880" alt="The Free My TV home screen: a glass shelf of apps, trending picks, and a drawer with the weather and crypto prices">
+<img src=".github/home.jpg" width="880" alt="The home screen: the clock and weather, the Continue Watching, Explore Movies and Explore Shows tabs, wide and narrow cards with each title's app icon, and a light shelf of app logos">
 
 </div>
 
-## What you get
+This is [Yuri Claure](https://github.com/yuriclaure)'s version of [Free My TV](https://github.com/simbasjungles/free-my-tv) by [@simbasjungles](https://github.com/simbasjungles): the same safe switch and the same settings, with a new look, Netflix in Continue Watching, an aerial screensaver and a lot of speed work for older TVs. Day to day it runs on a 2018 Sony BRAVIA (Android 9, 2 GB of memory), and every number below was measured there.
 
-- **No ads.** No sponsored rows, banners or autoplaying promos. Not one.
-- **Your apps, front and center.** The streaming apps you actually use, on a glass shelf. Pick them and their order right on the TV.
-- **Trending, not sponsored.** Three fresh picks every hour (up to six, in Home Settings) from what's trending this week and the latest releases, only from apps you already have, and from the services you choose. The focused one opens wide and the others show their posters. Movies and Shows get their own tabs, and on Google TV your own [Plex library](#your-plex-library-optional) can join in.
-- **Continue Watching** (Google TV and Android TV). *Home Settings* → *Top of the screen* puts what you left halfway in your apps on top, with its progress, and OK picks it up in its app. Or a big clock, or the picks.
-- **Your TMDB key from your phone.** *Home Settings* → *TMDB key* shows a QR code: scan it and paste the key. On LG and Samsung, type it with the remote.
-- **Weather and markets, one press away.** The hour-by-hour forecast (or the next 5 days), sunrise and sunset, and live crypto prices; on LG and Samsung, also rain in the next two hours, the UV index and the air quality.
-- **Live TV or your box on HDMI, one press away** (LG and Samsung). *Home Settings* → *Live TV button* picks what the first top button opens: Live TV, as before, or one of the TV's HDMI inputs, shown under the name you gave the input on the TV when it has one.
-- **What's playing.** Music, a podcast or the radio going on in the background shows on the home screen and the screensaver: the title, the artist and the app, from any app that tells Android what it plays (*Home Settings*, off until you turn it on).
-- **The status at a glance, and a mouse** (Google TV and Android TV). *Home Settings* → *Status icons* puts Wi-Fi or Ethernet, Bluetooth audio and a USB drive at the top of the home screen; off, nothing listens for them. A mouse or an air-mouse remote works too: hover moves the focus, the wheel scrolls, a click picks.
-- **Light by day, dark by night.** It follows your city's real sunset, the way your phone does.
-- **A screensaver to match.** Full-screen photos of the picks with a big glass clock. On LG and Samsung, *Home Settings* → *Screensaver* can make it a large clock with the weather instead, drifting slowly so it doesn't burn into OLED screens. Optionally (*Watch from the screensaver*, in Home Settings), OK opens the title on screen in its app, and any other button just closes it.
-- **Dimming for a dark room** (LG and Samsung). *Home Settings* → *Dim* darkens Free My TV's own screens, not the apps you open: low, medium, high, or automatic (medium from 22:00 to 07:00). Off until you pick it.
-- **Your own photos** (Google TV and Android TV). Send them from your computer (up to 100): the screensaver shows them, and without picks one is the home screen's background each hour.
-- **Fast.** 60 fps, every frame in 16.6 ms, on the TV's own chip. The home screen uses 96 MB of memory instead of 242 MB (−60%).<br><sub>Measured on a 98″ TCL Google TV running Android 14.</sub>
-- **Set up on the TV.** Language, your city, temperature, theme, how many picks and which streaming services they come from, the weather and prices cards, the forecast's hours or days, which coins, and the apps on the shelf, in Free My TV's own settings.
-- **Safe.** No root. Nothing is uninstalled. One button brings back the factory home screen.
+## What's new in this version
+
+- **A new look for the cards.** Each title's line under its card has the app's own icon on the left, the title, and the details on the right (*S3 E3 · 30 min left*, or the genre and length). The card you're on opens wide with the title's logo over its picture; the text grows with it, without a flicker.
+- **Progress on the card's edge.** How far you are is a straight line in the app's colour, set into the card's bottom border: 4 px on the opened card, 3 px on the others.
+- **Netflix in Continue Watching.** Netflix's TV app doesn't share what you're watching with Android, so its shows never appeared. In *Home Settings* → *Netflix account*, a QR code opens a page on your phone where you paste the two cookies of a netflix.com session (`NetflixId` and `SecureNetflixId`): the TV then reads your profile's viewing activity, with the right episode and how far in you are, and OK opens it in Netflix. It refreshes as soon as you come back from Netflix and every 10 minutes. The cookies stay in the app's private files on the TV; *Sign out of Netflix* forgets them. It uses netflix.com's own web calls, which Netflix may change at any time.
+- **A weather card for the day and the week.** In the drawer: the temperature curve for the next hours with their symbols, and each day of the week as a range bar from its low to its high, with the chance of rain.
+- **A light shelf.** The apps sit on a full-width frosted band with even padding, their logos on white tiles that lift when focused.
+
+<img src=".github/drawer.jpg" width="880" alt="The drawer under the shelf: Inputs (Live TV, HDMI 1, PlayStation 5, HDMI 3, HDMI 4), Shortcuts, and the weather card with the day's temperature curve and the week's ranges">
+
+- **Aerial screensaver.** *Home Settings* → *Screensaver* → *Aerial videos*: the slow aerial films of Apple TV, Fire TV and the Aerial community, with the place and Apple's caption for each moment, the clock and the weather. ← → goes to the previous or next video, ↓ tells you about this one (and can hide it for good). Pick the sources, scenes, time of day, quality (up to 4K HEVC) and whether captions and music show. Every video plays once before any comes back, across sessions.
+- **The screensaver opens fast and stays smooth.** The start and the end of the next four videos are kept on the TV (about 17 MB each), the rest streams into memory as it plays, and the next one is prepared while this one runs. → shows the next 4K video in about half a second (it was 3.2 s), the cache stays under 256 MB (it held up to 1.2 GB of whole videos), and playback runs at an even 30 fps.
+
+<img src=".github/saver.jpg" width="880" alt="The aerial screensaver: an aerial view of the Okavango Delta, with its place and caption in the bottom left and the clock, date and weather in the bottom right">
+
+- **Now Playing.** While music plays, a *Now Playing* tab shows the cover, the title, the artist, the progress and round controls, with level bars that move at a steady 30 fps. On the screensaver the cover, song and artist sit in the top corner and follow every song change.
+- **App and input switchers.** A frosted strip down the right edge lists every app (the shelf's first), and one down the left edge lists Live TV and the TV's inputs, over whatever is playing. A remote-button mapper can open them with the actions `io.freemytv.action.SWITCH_APPS` and `io.freemytv.action.SWITCH_INPUTS`.
+- **A warning when the remote stops working.** If the Bluetooth remote's buttons start arriving as voice (its mic button stuck, or pressed by a cushion), the top of the home screen says so and what to do. *Home Settings* → *Stuck remote warning* turns it off.
+- **Faster on older TVs.** On Android 8 to 11, text is drawn from cached images, the clock and weather header is kept ready, and nothing is redrawn under a fade. On the BRAVIA, moving between cards went from ~55 to ~30 ms a frame, Settings' list from ~42 to ~21 ms, and the screensaver's handover back to the home screen no longer flickers.
+
+Everything else comes from Free My TV: no ads, trending picks from your own apps (TMDB), Continue Watching from your apps, light by day and dark by night, your own photos, the settings on the TV, and the switch back to the factory home screen.
 
 ## Install
 
-About ten minutes. You need a Google TV or Android TV (Android 8 or newer) and a computer on the same Wi-Fi. The APK goes on the TV, not on your phone (on a phone, the settings say so and nothing switches).
+About ten minutes. You need a Google TV or Android TV (Android 8 or newer) and a computer on the same Wi-Fi. There's no ready APK for this version: you build it, which an AI assistant does for you.
 
 ### The easy way: an AI assistant
 
 1. **On the TV**, turn on developer mode: Settings → System → About → press *Android TV OS build* 7 times. Then Settings → System → Developer options → turn on **USB debugging**. Write down the TV's IP address (Settings → Network & Internet).
 2. **On your computer**, open an AI coding assistant ([Claude Code](https://claude.com/claude-code), Codex or Antigravity) and say:
-   > Install Free My TV (github.com/simbasjungles/free-my-tv) on my TV at 192.168.1.50. I live in Lisbon.
+   > Install Free My TV (github.com/yuriclaure/free-my-tv) on my TV at 192.168.1.50. I live in Lisbon.
 
    It downloads the code, installs the tools it needs, builds the app and puts it on your TV, and asks before anything important. Swap in your TV's IP and your city.
 3. **On the TV**, open *Free My TV* → *Home Screen* → *Free My TV*. That's when the TV asks *Allow USB debugging?* for Free My TV: tick *Always allow* and accept.
-
-### The ready APK
-
-No tools to install besides adb. The APK on the [latest release](https://github.com/simbasjungles/free-my-tv/releases/latest) has no TMDB key: add yours on the TV for the picks (*Home Settings* → *TMDB key*, [below](#the-tmdb-key)). It takes your city from the TV's time zone (change it in *Home Settings* → *City*).
-
-If you built Free My TV yourself before, switch back to *Original* and uninstall it first: your build and the release are signed with different keys.
-
-1. **On the TV**, do step 1 above.
-2. **On your computer**, download `FreeMyTV.apk` from the release and install it:
-   ```bash
-   adb connect 192.168.1.50:5555
-   adb install -r FreeMyTV.apk
-   ```
-   On Android 14, Google Play Protect may hold the install with *Risky app blocked*: choose *More details* → *Install anyway*.
-
-   Install it with adb like this, not by opening the APK on the TV: from a file manager or a browser, Play Protect can refuse it outright with *App blocked to protect your device* (in some countries it blocks sideloaded apps that have an accessibility service or a notification listener, which Free My TV uses for the remote's buttons and Now Playing; #378).
-
-   On TCL TVs, also let it run in the background (TCL blocks it by default, and the switch never starts). An uninstall takes the permission back, so run it again after every new install:
-   ```bash
-   adb shell "appops set io.freemytv AUTO_START allow || appops set io.freemytv APP_AUTO_START allow"
-   ```
-3. **On the TV**, do step 3 above.
-
-For the picks, add your TMDB key in *Home Settings* → *TMDB key* (below).
-
-**Updates come to the TV.** Once a week the APK from the release looks for a newer release and downloads it; the home screen then says so once, and *Home Settings* → *Updates* (the last row) installs it through Android's installer, which asks first (and, the first time, asks to allow Free My TV to install apps). OK on *Updates* also checks right away. The download must come from this repository's releases, match the size and SHA-256 GitHub lists, be newer, and be signed with the project's key. A build you made yourself checks only when you press *Updates*, and only says when a new version is out: build it again to update.
 
 ### The manual way
 
@@ -84,6 +63,7 @@ For the picks, add your TMDB key in *Home Settings* → *TMDB key* (below).
    On Linux, get OpenJDK 17, Android's command-line tools and adb from your package manager, then run the same `sdkmanager` line. On Windows, use Git Bash (which Claude Code uses there) or WSL.
 3. **Build:**
    ```bash
+   git clone https://github.com/yuriclaure/free-my-tv && cd free-my-tv
    ./build.sh
    ```
    The first run creates `config.properties`. Set your city and your [TMDB key](#the-tmdb-key) there, then run it again.
@@ -92,7 +72,7 @@ For the picks, add your TMDB key in *Home Settings* → *TMDB key* (below).
    adb connect 192.168.1.50:5555
    adb install -r FreeMyTV.apk
    ```
-   If the install seems stuck, look at the TV: on Android 14, Google Play Protect may hold it with *Risky app blocked* ("built for an older version of Android"), since Free My TV targets Android 13. Choose *More details* → *Install anyway*. Updates don't ask again.
+   If the install seems stuck, look at the TV: on Android 14, Google Play Protect may hold it with *Risky app blocked* ("built for an older version of Android"), since Free My TV targets Android 13. Choose *More details* → *Install anyway*. Updates don't ask again. Install it with adb like this, not by opening the APK on the TV, where Play Protect can refuse it outright.
 
    Chromecast with Google TV on Android 14 keeps port 5555 closed even with USB debugging on: turn on *Wireless debugging* (Developer options), pair with `adb pair <address:port> <code>`, then run `adb tcpip 5555` over that connection. Port 5555 closes again at every restart, so after one, *Original*, the watchdog and the boot check can't reach ADB until you run `adb tcpip 5555` again (the pairing stays).
 
@@ -104,49 +84,11 @@ For the picks, add your TMDB key in *Home Settings* → *TMDB key* (below).
 
    On some TCL TVs (Android 11, Realtek), a second background killer, TGuard, can stop the switch while it measures the original home screen: the settings screen closes and the TV's own home screen stays. Android runs the switch again by itself within a minute or two; then press Home: Free My TV opening means it went through.
 
-## LG TVs (webOS)
+**Updating:** pull the latest code and build and install again (`git pull && ./build.sh && adb install -r FreeMyTV.apk`). Keep `freemytv.keystore`: an update must be signed with the same key. A build you made yourself never downloads updates by itself.
 
-The same home screen as an LG app: the picks, the glass shelf with your apps, the drawer with inputs, weather and prices, day and night, Home Settings and the shelf editor. It installs through LG's own Developer Mode, with nothing rooted or changed on the TV. LG's home screen stays where it is, and Free My TV is one press of a number key away (or in LG's app list, on remotes without them).
+### LG and Samsung TVs
 
-You need an LG TV (webOS 3 or newer) and a computer on the same Wi-Fi, with Python 3.
-
-1. **On the TV**, open the LG Content Store and install **Developer Mode**. Sign in with a free [LG developer account](https://webostv.developer.lge.com), turn on **Dev Mode Status** (the TV restarts), then turn on **Key Server**. Write down the IP address and the passphrase it shows.
-2. **On your computer**, get the code and build. `config.properties` works as for Google TV (your city, your [TMDB key](#the-tmdb-key)):
-   ```bash
-   git clone https://github.com/simbasjungles/free-my-tv && cd free-my-tv
-   python3 webos/build.py
-   ```
-3. **Install.** The first time, it asks for the TV's passphrase; updates don't. On a TV that isn't 4K, it puts the app in at 1280 × 720, the size those TVs draw apps at:
-   ```bash
-   python3 webos/install.py 192.168.1.50
-   ```
-4. **On the TV**, while Free My TV is open, hold a number key on the remote. From then on, that key opens it from anywhere. On a remote without number keys, open it from LG's app list on the home screen, like any other app.
-
-With an AI assistant, say *"Install Free My TV (github.com/simbasjungles/free-my-tv) on my LG TV at 192.168.1.50. I live in Lisbon."* It builds the app and hands you the install command, so you type the passphrase yourself.
-
-With the [webOS Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel), you can skip the computer: add the repository `https://freemytv.io/webos/apps.json` in the Channel's settings, and Free My TV shows up in its list. That's the release build: it takes the city from the TV's time zone (change it in *Home Settings* → *City*), and for the picks you type your [TMDB key](#the-tmdb-key) in *Home Settings* → *TMDB key*. If you installed your own build, don't update it from there, or the release replaces it. On some LG TVs that aren't 4K, that build fills only the top-left part of the screen: `install.py` puts it in at the right size there.
-
-On webOS 6 and newer, LG doesn't let apps installed through Developer Mode see which apps the TV has. Free My TV then shows the well-known ones it finds (Netflix, YouTube, Prime Video, Disney+, Apple TV, Plex and more) and asks the TV, once, for the access LG's phone app uses: a message on the TV asks whether to allow Free My TV. Allow it, and from the next start all your apps show, with their icons.
-
-Older LG TVs (webOS 3) don't let Free My TV see their apps at all, so the shelf stays empty. There your computer asks the TV instead (the TV asks once whether to allow it), and the list and icons are built into the app. Run it again after installing new apps on the TV:
-```bash
-python3 webos/apps.py 192.168.1.50 && python3 webos/build.py && python3 webos/install.py 192.168.1.50
-```
-
-Developer Mode lasts about 40 days: open the Developer Mode app now and then and press **EXTEND**, or let your computer do it with `python3 webos/renew.py 192.168.1.50` (it needs the TV on and reachable, and the key `install.py` already saved). Run that on a schedule and you never touch EXTEND again — weekly is plenty; `webos/renew.py` shows a cron line for macOS and Linux and a Task Scheduler one for Windows. To remove Free My TV, run `python3 webos/install.py 192.168.1.50 --uninstall`.
-
-## Samsung TVs (Tizen)
-
-The same home screen as a Samsung app, with everything the LG one has: the picks, the shelf, the drawer with the inputs, the weather and the prices, day and night, and its own settings. It installs through Samsung's own Developer Mode, with nothing rooted or changed on the TV, and Samsung's home screen stays where it is.
-
-You need a Samsung TV on Tizen, from 2015 or newer, and a computer on the same Wi-Fi (a 2015 UE48JU6100 on Tizen 2.3 was reported working, #317, while a 2016 Full HD UE49K5670 refuses developer installs altogether, with `failed[118]` even from Samsung's own `tizen install`, #349 (but this is fixable — see [tizen/install-118.md](tizen/install-118.md)): on a 2016 UE49KU6640 and a UN49KU6400 the same answer was a copy left by an earlier failed install, which `python3 tizen/install.py <IP> --uninstall` removed (sign with a Tizen certificate there: a Samsung one kept getting it on the KU6400); Orsay models can't run it, but a Google TV streamer on HDMI can). 2015 and 2016 TVs can't run TizenBrew, so on those build it yourself (below); TV Settings isn't in the drawer there, since apps can't open the TV's settings, nor on 2017 and 2018 TVs (Tizen 3 and 4), which freeze trying (#257); the remote's own Settings button works on all of them.
-
-1. **On the TV**, open **Apps** and type `1 2 3 4 5` on the remote. Turn **Developer mode** on, type your computer's IP address in **Host PC IP**, and restart the TV.
-2. **On your computer**, download [TizenBrew Installer](https://github.com/reisxd/TizenBrewInstaller/releases/latest), the community's installer for Samsung TVs, open it and connect to your TV.
-3. **Install from GitHub:** type `simbasjungles/free-my-tv`. On 2023 and newer TVs it asks you to sign in to your Samsung account once, to sign the app for your TV.
-4. **Straight to it:** in the TV's settings, under Start Screen Options, turn on **Autorun Last App**: the TV turns on into Free My TV (tested on a 2017 TV; 2019 and 2020 TVs don't reopen it, #356). There, move Free My TV to the first place in the Home bar, so it's one press away.
-
-This build takes your city from the TV's time zone (change it in *Home Settings* → *City*), and for the trending picks you type your [TMDB key](#the-tmdb-key) in *Home Settings* → *TMDB key*. To build it with your own `config.properties` instead, open the folder in Claude Code and say *"Install Free My TV on my Samsung TV at 192.168.1.50. I live in Lisbon."* It sets up Samsung's tools, and on 2023 and newer TVs you sign in to your Samsung account in the browser to make the certificate. Your signed build installs with `python3 tizen/install.py 192.168.1.50`, which needs only Python: no Tizen Studio, and no Rosetta on Apple Silicon Macs.
+This version changes only the Google TV and Android TV app. Free My TV also runs on LG (webOS) and Samsung (Tizen) TVs as an app: for those, follow the [original project's instructions](https://github.com/simbasjungles/free-my-tv#lg-tvs-webos). The code for them (`web/`, `webos/`, `tizen/`) is here too, unchanged.
 
 ## Settings
 
@@ -286,7 +228,7 @@ To remove it for good, switch to *Original* first, then uninstall *Free My TV* (
 
 ## Any TV
 
-Free My TV runs on Google TV and Android TV: TCL, Sony, Hisense, Philips, Xiaomi, Vestel-made TVs (F&U), KTC-made TVs (NextStar) and more, plus streamers like Chromecast with Google TV, the Google TV Streamer, onn 4K, the Xiaomi Mi TV Stick and NVIDIA Shield, and projectors like the Wanbo T2 Ultra. And on [LG](#lg-tvs-webos) and [Samsung](#samsung-tvs-tizen) TVs, as an app.
+Free My TV runs on Google TV and Android TV: TCL, Sony, Hisense, Philips, Xiaomi, Vestel-made TVs (F&U), KTC-made TVs (NextStar) and more, plus streamers like Chromecast with Google TV, the Google TV Streamer, onn 4K, the Xiaomi Mi TV Stick and NVIDIA Shield, and projectors like the Wanbo T2 Ultra. And on [LG and Samsung](#lg-and-samsung-tvs) TVs, as an app.
 
 **Huawei TVs (HarmonyOS) and the Kalley 43G200:** there Free My TV stays an app you open. After the switch, one of each didn't start again (the Huawei came back only with a factory reset), so the switch refuses on them, and one already switched by an older version goes back to *Original* by itself. On Fire TV it's an app too: Amazon's home screen keeps the Home button.
 
@@ -331,7 +273,13 @@ It's your code, and Claude Code finds its way around it. Try:
 | [`WatchArt.java`](app/src/io/freemytv/WatchArt.java) | Continue Watching pictures, only from the TV |
 | [`HomeData.java`](app/src/io/freemytv/HomeData.java) | Weather and prices |
 | [`HomeApps.java`](app/src/io/freemytv/HomeApps.java) | The shelf, inputs and All Apps |
-| [`DreamView.java`](app/src/io/freemytv/DreamView.java) | The screensaver |
+| [`DreamView.java`](app/src/io/freemytv/DreamView.java) | The photo screensaver |
+| [`AerialSaver.java`](app/src/io/freemytv/AerialSaver.java), [`AerialSource.java`](app/src/io/freemytv/AerialSource.java) | The aerial screensaver, and its videos' start and end kept on the TV while the rest streams |
+| [`NetflixWatch.java`](app/src/io/freemytv/NetflixWatch.java) | Netflix's Continue Watching, from your account |
+| [`SwitcherActivity.java`](app/src/io/freemytv/SwitcherActivity.java), [`InputSwitcherActivity.java`](app/src/io/freemytv/InputSwitcherActivity.java) | The app and input switchers |
+| [`NowPlaying.java`](app/src/io/freemytv/NowPlaying.java) | What's playing, for the Now Playing tab and the screensaver |
+| [`RemoteFix.java`](app/src/io/freemytv/RemoteFix.java) | The stuck remote warning |
+| [`TextCache.java`](app/src/io/freemytv/TextCache.java) | Text drawn from cached images on Android 8 to 11 |
 | [`SettingsActivity.java`](app/src/io/freemytv/SettingsActivity.java) | The settings screen (the app's icon) |
 | [`Prefs.java`](app/src/io/freemytv/Prefs.java) | Settings changed on the TV |
 | [`RemoteKeys.java`](app/src/io/freemytv/RemoteKeys.java) | The remote's app buttons (TCL, Sony, Xiaomi and others) |
@@ -342,7 +290,7 @@ It's your code, and Claude Code finds its way around it. Try:
 | [`webos/build.py`](webos/build.py), [`webos/install.py`](webos/install.py), [`webos/renew.py`](webos/renew.py) | The LG app package, its install, and renewing Developer Mode |
 | [`tizen/build.py`](tizen/build.py) | The Samsung app package |
 
-The website ([freemytv.io](https://freemytv.io)) is in [`docs/`](docs): plain HTML, CSS and JS on GitHub Pages.
+The original project's website ([freemytv.io](https://freemytv.io)) is in [`docs/`](docs): plain HTML, CSS and JS on GitHub Pages.
 
 ## Translations
 
@@ -372,10 +320,14 @@ reference (fix them by hand); the others were machine-made, and corrections from
 
 No accounts, no analytics, no tracking. The app talks to TMDB, Open-Meteo (their forecast at api.open-meteo.com, the city search at geocoding-api.open-meteo.com and, on LG and Samsung while the weather card is on, their air quality at air-quality-api.open-meteo.com, with the coordinates you set, or your time zone's main city), and Binance only when `show_crypto=true`, Watchmode only when you set a key, your Plex server only when you set a `plex_url`, your Immich server only when you set one, and Trakt (api.trakt.tv) only when you set a `trakt_client_id` and sign in on the TV. With `home_assistant_url` set and *Home Settings* → *Home Assistant* on, it talks to that server, yours, and to no other: only while the bottom drawer is open, to read the states of the entities you listed and to call the one you press. Turned off, nothing is asked of it, and the names it read are forgotten. On Google TV and Android TV, the APK from the release asks GitHub (api.github.com) once a week, or when you press *Updates*, for the latest release, and when there's a newer one downloads it from github.com and GitHub's download server (release-assets.githubusercontent.com); a build you made yourself asks only when you press *Updates*. The *Now Playing widget* reads what apps are playing (title, artist, the app) through a notification listener, the only way Android shares it: Free My TV allows the listener only while the widget is on, never reads a notification with it, and asks Android to unbind it as soon as it connects, so it stays unbound. What's playing never leaves the TV. While *Home Settings* → *TMDB key* or *Watchmode key* shows its QR code (5 minutes at most), the TV answers on your home network at that code's address, for one key; the key goes only to that service, to check it. Continue Watching (Home Settings) reads what your apps note on the TV itself and shows only pictures already on the TV: it downloads nothing. *Home Settings* → *Status icons* reads only whether the TV has Wi-Fi or Ethernet, a Bluetooth audio device and a mounted USB drive, and only while the row is on: on Android 12 and newer it asks for *Nearby devices* (BLUETOOTH_CONNECT) for the Bluetooth part, and none of it leaves the TV. Your settings stay on your computer and your TV.
 
+In this version, two more, each only when you turn it on. With *Netflix account* signed in, the TV talks to www.netflix.com with your session's cookies, only to read your profile's viewing activity and each title's details: the cookies stay in the app's private files (never in the APK, the log or the settings), and *Sign out of Netflix* deletes them. With *Aerial videos* as the screensaver, it streams the videos from where they live: Apple (sylvan.apple.com), Amazon (aebcs-cdn-prod-na.services.firetv.amazon.dev) and the Aerial community (github.com), keeping only the start and end of the next few on the TV. The *Stuck remote warning* reads the TV's own log for the remote's voice channel, and nothing leaves the TV.
+
 
 ## Credits
 
+- Based on [Free My TV](https://github.com/simbasjungles/free-my-tv) by [@simbasjungles](https://github.com/simbasjungles) and its contributors (MIT).
 - Built with [Claude Code](https://claude.com/claude-code).
+- The aerial screensaver's list of videos comes from [Aerial Views](https://github.com/theothernt/AerialViews)' catalogues: Apple's tvOS aerials, Amazon Fire TV's and the Aerial community's. The videos belong to their owners and stream from their servers.
 - The LG version builds on what [@danielthejoker18](https://github.com/danielthejoker18) found in [FreeMyTvWebOS](https://github.com/danielthejoker18/FreeMyTvWebOS) (MIT): installing through Developer Mode and opening apps through the TV's service bus.
 - On Samsung TVs it installs with [TizenBrew Installer](https://github.com/reisxd/TizenBrewInstaller) by [@reisxd](https://github.com/reisxd).
 - This product uses the TMDB API but is not endorsed or certified by [TMDB](https://www.themoviedb.org/).
