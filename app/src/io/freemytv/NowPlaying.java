@@ -53,6 +53,32 @@ public class NowPlaying extends NotificationListenerService {
         }
     }
 
+    /** The track's picture (the cover, else the app's art or icon), or null. */
+    static android.graphics.Bitmap art(MediaMetadata md) {
+        if (md == null) return null;
+        android.graphics.Bitmap a = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (a == null) a = md.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        if (a == null) a = md.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        return a;
+    }
+
+    /**
+     * What the picture looks like, cheaply (its size and 16 pixels): apps like Spotify send a new track's title first and
+     * its cover a moment later, in a second update with the same title, so the title alone missed the new cover. Each
+     * update brings a new Bitmap object, so this looks at the pixels, not at which object it is.
+     */
+    static String artSignature(MediaMetadata md) {
+        android.graphics.Bitmap a = art(md);
+        if (a == null || a.isRecycled()) return "none";
+        int w = a.getWidth(), h = a.getHeight(), sum = 17;
+        try {
+            for (int i = 1; i <= 4; i++) for (int j = 1; j <= 4; j++) sum = sum * 31 + a.getPixel(w * i / 5, h * j / 5);
+        } catch (RuntimeException e) {
+            return w + "x" + h;
+        }
+        return w + "x" + h + ":" + Integer.toHexString(sum);
+    }
+
     static ComponentName component(Context c) {
         return new ComponentName(c, NowPlaying.class);
     }
@@ -85,6 +111,13 @@ public class NowPlaying extends NotificationListenerService {
         volatile String text;
         /** The title alone (the app's package when it gives none): the line's other parts can change every second. */
         volatile String title;
+        /**
+         * The music app's session for the home screen's Now Playing tab: one playing (or buffering, between songs) that
+         * names an artist, which a film or a show doesn't; null when there's none, so the tab goes as soon as the music
+         * is paused or stopped. Its state and metadata are read from it.
+         */
+        volatile MediaController music;
+        private String musicKey = "";
 
         Watch(Context c, Runnable changed) {
             context = c;
@@ -128,6 +161,7 @@ public class NowPlaying extends NotificationListenerService {
         }
 
         private void update() {
+            boolean musicChanged = updateMusic();
             String now = null, nowTitle = null;
             for (MediaController mc : controllers) {   // most recent first
                 PlaybackState s = mc.getPlaybackState();
@@ -142,10 +176,38 @@ public class NowPlaying extends NotificationListenerService {
                     break;
                 }
             }
-            if (Objects.equals(now, text)) return;
+            if (Objects.equals(now, text) && !musicChanged) return;
             title = nowTitle;
             text = now;
             changed.run();
+        }
+
+        /** Picks the music session; true when it, its track, its state or its position (a seek) changed. */
+        private boolean updateMusic() {
+            MediaController found = null;
+            for (MediaController mc : controllers) {
+                PlaybackState s = mc.getPlaybackState();
+                int state = s == null ? PlaybackState.STATE_NONE : s.getState();
+                if (state != PlaybackState.STATE_PLAYING && state != PlaybackState.STATE_BUFFERING
+                        && state != PlaybackState.STATE_CONNECTING) continue;
+                MediaMetadata m = mc.getMetadata();
+                if (m == null || TextUtils.isEmpty(m.getString(MediaMetadata.METADATA_KEY_ARTIST))) continue;
+                found = mc;
+                break;
+            }
+            String key = "";
+            if (found != null) {
+                MediaMetadata m = found.getMetadata();
+                PlaybackState s = found.getPlaybackState();
+                key = found.getPackageName() + "|" + m.getString(MediaMetadata.METADATA_KEY_TITLE) + "|"
+                        + m.getString(MediaMetadata.METADATA_KEY_ARTIST) + "|" + m.getLong(MediaMetadata.METADATA_KEY_DURATION)
+                        + "|" + (s == null ? 0 : s.getState()) + "|" + (s == null ? 0 : s.getLastPositionUpdateTime())
+                        + "|" + artSignature(m);   // the cover that comes after the title
+            }
+            music = found;
+            if (key.equals(musicKey)) return false;
+            musicKey = key;
+            return true;
         }
 
         /** "Title · Artist · App": the parts the app gives, then its name; null when there's none of them. */

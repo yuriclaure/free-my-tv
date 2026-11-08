@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- play_arrow: Material Symbols Rounded, filled (Apache 2.0). White: the Now Playing tab tints it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <group android:translateY="960">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M 314.02 -254.65 v -456.7 q 0 -15.91 10.21 -25.11 10.22 -9.19 23.75 -9.19 4.53 0 9.16 1.12 4.62 1.12 9.31 3.58 l 359.29 229.6 q 7.84 5.48 11.87 12.44 4.04 6.95 4.04 15.91 t -4.04 15.91 q -4.03 6.96 -11.87 12.44 l -359.29 229.6 q -4.69 2.46 -9.32 3.46 t -9.16 1 q -13.56 0 -23.75 -9.02 -10.2 -9.02 -10.2 -25.04 Z" />
+    </group>
+</vector>

@@ -38,6 +38,18 @@ import java.util.function.Supplier;
  * similar weight.
  */
 final class Ui {
+    /**
+     * Background work (images, lists, the network) on threads at background priority: they still run, but give way to
+     * the UI thread and the render thread, so a card's picture being decoded doesn't cost an animation its frames (a
+     * 2018 BRAVIA's frames jumped from ~26 to ~57 ms when they ran at the UI's priority).
+     */
+    static java.util.concurrent.ExecutorService background(int threads) {
+        return java.util.concurrent.Executors.newFixedThreadPool(threads, r -> new Thread(() -> {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            r.run();
+        }));
+    }
+
     private Ui() {}
 
     /**

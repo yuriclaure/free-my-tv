@@ -62,7 +62,7 @@ final class HomeData {
 
     // Both forecasts in one answer, the next 48 hours and today plus 5 days: Home Settings → Forecast switches without
     // asking again, and offline too.
-    private static final String WEATHER_QUERY = "&current=temperature_2m,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code"
+    private static final String WEATHER_QUERY = "&current=temperature_2m,apparent_temperature,weather_code,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code,precipitation_probability_max"
             + "&hourly=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=6&forecast_hours=48";
 
     private static String weatherPlace() {
@@ -161,11 +161,11 @@ final class HomeData {
     }
 
     static final class Weather {
-        double temp = Double.NaN, max = Double.NaN, min = Double.NaN;
-        int code = -1;
+        double temp = Double.NaN, max = Double.NaN, min = Double.NaN, feels = Double.NaN;
+        int code = -1, todayCode = -1, todayRain = -1;   // today's whole-day code and chance of rain (%), -1 unknown
         boolean isDay = true;
         long sunrise, sunset;   // today's, in epoch ms
-        // Next hours (starting at the next full hour): time, temperature, code and day/night.
+        // Next hours (starting at the next full hour, up to HOURS): time, temperature, code and day/night.
         final List<Long> hours = new ArrayList<>();
         final List<Double> hourTemp = new ArrayList<>();
         final List<Integer> hourCode = new ArrayList<>();
@@ -175,7 +175,11 @@ final class HomeData {
         final List<Double> dayMax = new ArrayList<>();
         final List<Double> dayMin = new ArrayList<>();
         final List<Integer> dayCode = new ArrayList<>();
+        final List<Integer> dayRain = new ArrayList<>();   // chance of rain (%), -1 unknown
     }
+
+    /** The next 24 hours: the weather card's curve. */
+    static final int HOURS = 24;
 
     private static HomeData instance;
 
@@ -375,7 +379,9 @@ final class HomeData {
         w.temp = current.getDouble("temperature_2m");
         w.code = current.getInt("weather_code");
         w.isDay = current.optInt("is_day", 1) == 1;
+        w.feels = current.optDouble("apparent_temperature");
         JSONObject daily = o.getJSONObject("daily");
+        JSONArray rain = daily.optJSONArray("precipitation_probability_max");
         w.max = daily.getJSONArray("temperature_2m_max").getDouble(0);
         w.min = daily.getJSONArray("temperature_2m_min").getDouble(0);
         w.sunrise = localTime(daily.getJSONArray("sunrise").getString(0), zone);
@@ -387,7 +393,7 @@ final class HomeData {
             JSONArray codes = hourly.getJSONArray("weather_code");
             JSONArray days = hourly.optJSONArray("is_day");
             long now = System.currentTimeMillis();
-            for (int i = 0; i < times.length() && w.hours.size() < 6; i++) {
+            for (int i = 0; i < times.length() && w.hours.size() < HOURS; i++) {
                 long at = localTime(times.getString(i), zone);
                 if (at <= now) continue;
                 w.hours.add(at);
@@ -402,11 +408,18 @@ final class HomeData {
         for (int i = 0; codes != null && i < dates.length() && w.days.size() < 5; i++) {
             String date = dates.getString(i);
             // Only days that haven't started at the city: today, and past days in a forecast kept offline, are left out.
-            if (localTime(date + "T12:00", zone) - 12 * 3600_000L <= now) continue;
+            if (localTime(date + "T12:00", zone) - 12 * 3600_000L <= now) {
+                if (localTime(date + "T12:00", zone) + 12 * 3600_000L > now) {   // today
+                    w.todayCode = codes.optInt(i, -1);
+                    w.todayRain = rain == null || rain.isNull(i) ? -1 : rain.optInt(i, -1);
+                }
+                continue;
+            }
             w.days.add(localTime(date + "T12:00", TimeZone.getDefault()));   // its noon on the TV's clock: named right anywhere
             w.dayMax.add(highs.optDouble(i));
             w.dayMin.add(lows.optDouble(i));
             w.dayCode.add(codes.optInt(i, -1));
+            w.dayRain.add(rain == null || rain.isNull(i) ? -1 : rain.optInt(i, -1));
         }
         return w;
     }

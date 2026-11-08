@@ -78,6 +78,7 @@ final class HomeApps {
         Bitmap logoDark;    // version for a light background (YouTube's white icon), if any
         float logoInk;      // fraction of the logo with ink (thin logos are drawn larger, with the same "weight")
         float logoScale = 1; // size tweak by eye (compact logos need more)
+        int brand;          // the app's brand colour (SHELF), for its focused tile; 0 = none
         boolean connected = true;
         HomeAssistant.Control control;   // HOME_ASSISTANT: the entity it shows and calls
 
@@ -121,13 +122,17 @@ final class HomeApps {
         {"amediateka", "Амедиатека", "ru.amediateka", "E31E24", "", "1"},
         {"wink", "Wink", "ru.rt.video.app.tv", "FF5A1F", "", "1"},
         {"spotify", "Spotify", "com.spotify.tv.android", "1DB954", "", "1"},
+        // UK: BBC iPlayer, My5 and ITVX as the "ATV launchers" shortcuts (hosh.io) install them on Android TVs.
+        {"iplayer", "BBC iPlayer", "hosh.io.atv_launchers.iPlayer", "FF4B95", "", "1"},
+        {"my5", "My5", "hosh.io.atv_launchers.my5", "4B3D7A", "", "1.1"},
+        {"itv", "ITVX", "hosh.io.atv_launchers.itvHub", "1FB5C0", "", "1.1"},
     };
     /**
      * Apps the shelf shows at once (it scrolls for the rest): 8, today's smallest tiles (178 wide in HomeView's 1760 of
      * content), so a shelf of up to 8 looks as it always did. The built-in list keeps 8, and low-memory TVs hold 8 at
      * most, without scrolling: every app on the shelf keeps its logo in memory, at two sizes.
      */
-    private static final int SHELF_VISIBLE = 8, FEW_APPS = 8;
+    private static final int SHELF_VISIBLE = 6, FEW_APPS = 8;   // 6 on screen: the tiles at their full 224 × 126
 
     /** Low memory (TCL's 1 GB models): every MB counts. */
     static boolean lowRam(Context c) {
@@ -208,6 +213,7 @@ final class HomeApps {
                 if (it.logo != null) it.logoInk = ink(it.logo);
                 it.logoDark = ownLogoCached(c, d[0] + "-dark");
                 it.logoScale = Float.parseFloat(d[5]);
+                it.brand = 0xFF000000 | Integer.parseInt(d[3], 16);
             }
             items.add(it);
         }
@@ -628,6 +634,7 @@ final class HomeApps {
 
     /** Opens the item; `options` for the transition, or null (the screensaver has no card to grow out of). */
     static boolean open(Context a, Item it, android.os.Bundle options) {
+        NetflixWatch.lastApp = it.pkg;   // back home after Netflix, its Continue Watching is read again
         // plain: tried when `intent` finds nothing (the app's own home, when it won't take the title's address)
         Intent intent, plain = null;
         switch (it.kind) {
@@ -1341,6 +1348,28 @@ final class HomeApps {
             if (scale < 1f) b = Bitmap.createScaledBitmap(b, Math.max(1, Math.round(b.getWidth() * scale)), Math.max(1, Math.round(b.getHeight() * scale)), true);
             return b;
         } catch (IOException e) {
+            return vectorLogo(c, key);
+        }
+    }
+
+    /**
+     * The shelf's own wordmark for `key` (res/drawable/logo_<key>.xml, white), drawn 640 wide and trimmed to its ink;
+     * null when there's none. The shelf colours it (white, or dark by day) and sizes it like any other logo.
+     */
+    private static Bitmap vectorLogo(Context c, String key) {
+        if (!key.matches("[a-z0-9_]+")) return null;
+        int id = c.getResources().getIdentifier("logo_" + key, "drawable", c.getPackageName());
+        if (id == 0) return null;
+        try {
+            Drawable d = c.getDrawable(id);
+            if (d == null || d.getIntrinsicWidth() <= 0 || d.getIntrinsicHeight() <= 0) return null;
+            int w = 640, h = Math.max(1, Math.round(640f * d.getIntrinsicHeight() / d.getIntrinsicWidth()));
+            Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            d.setBounds(0, 0, w, h);
+            d.draw(new Canvas(b));
+            return trim(b);
+        } catch (RuntimeException e) {
+            AppLog.w("logo " + key + ": " + e.getMessage());
             return null;
         }
     }

@@ -188,6 +188,45 @@
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection"
             android:theme="@style/FreeMyTV.Panel" />
 
+        <!-- The app switcher: a strip down the right edge over whatever is playing. Exported for button mappers
+             (action io.freemytv.action.SWITCH_APPS); started again, it closes. In :home, which is always running:
+             it opens at once (no process to start, fonts already loaded) and keeps its icons between openings. -->
+        <activity
+            android:name=".SwitcherActivity"
+            android:process=":home"
+            android:exported="true"
+            android:label="Switch apps"
+            android:launchMode="singleTask"
+            android:taskAffinity="io.freemytv.switcher"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection"
+            android:theme="@style/FreeMyTV.Panel">
+            <intent-filter>
+                <action android:name="io.freemytv.action.SWITCH_APPS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- The input switcher: the same strip on the left edge, for Live TV and the inputs. Exported for button
+             mappers (action io.freemytv.action.SWITCH_INPUTS); started again, it closes. -->
+        <activity
+            android:name=".InputSwitcherActivity"
+            android:process=":home"
+            android:exported="true"
+            android:label="Switch inputs"
+            android:launchMode="singleTask"
+            android:taskAffinity="io.freemytv.inputs"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|locale|layoutDirection"
+            android:theme="@style/FreeMyTV.Panel">
+            <intent-filter>
+                <action android:name="io.freemytv.action.SWITCH_INPUTS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <service
             android:name=".Screensaver"
             android:process=":home"
@@ -277,5 +316,9 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+            <!-- A stuck remote's message on the home screen. Only adb's shell sends it (HomeMode's remote watch): DUMP is a
+             permission apps can't have. -->
+        <receiver android:name=".RemoteFix" android:exported="true" android:permission="android.permission.DUMP"
+            android:process=":home" />
     </application>
 </manifest>

@@ -82,27 +82,34 @@ final class Backdrop {
         // Cropped to 16:9 at the source's resolution first, then filtered down (no step over 2×).
         Bitmap crop = center(src, (float) W / H);
         if (crop != src) src.recycle();
-        Bitmap out = Ui.downscale(crop, W, H);
+        // The light design only takes smaller copies (the card, frost, glass): a smaller photo isn't scaled up first.
+        boolean small = forLight && crop.getWidth() <= W;
+        Bitmap out = small ? crop : Ui.downscale(crop, W, H);
         if (out != crop) crop.recycle();
-        if (!out.isMutable()) {
+        if (!forLight && !out.isMutable()) {
             Bitmap copy = out.copy(Bitmap.Config.ARGB_8888, true);
             out.recycle();
             out = copy;
         }
-        Canvas c = new Canvas(out);
         if (forLight) {
             // Light design: everything comes from the photo without scrims.
             // The wide card is far wider than the photo: its strip comes off the bottom (under the card's text), not
             // half off the top.
             Bitmap wide = card(out, WIDE_W, WIDE_H, 0);
-            int[] frost = reduce(out, FW, FH, 3, 3);
+            // The glass comes off the photo once at its size, and the frost off that small copy (not the photo again).
+            Bitmap g = shrink(out, GW, GH);
+            int[] sharpPx = own ? pixels(g, GW, GH) : null;
+            Bitmap f = Bitmap.createScaledBitmap(g, FW, FH, true);
+            int[] glass = blur(pixels(g, GW, GH), GW, GH, 2, 2);
+            if (f != g) g.recycle();
+            int[] frost = blur(pixels(f, FW, FH), FW, FH, 3, 3);
+            f.recycle();
             int[] light = whiten(frost.clone(), 0.82f);
-            int[] glass = reduce(out, GW, GH, 2, 2);
             int[] lightGlass = whiten(glass.clone(), 0.74f);
             int[] night = darken(frost.clone(), 0.76f);
             int[] nightGlass = darken(glass, 0.56f);
             if (own) {
-                int[] sharp = reduce(out, GW, GH, 1, 1);
+                int[] sharp = blur(sharpPx, GW, GH, 1, 1);
                 int[] lightBg = ramp(sharp.clone(), 0.82f, 0.45f, true), nightBg = ramp(sharp, 0.76f, 0.5f, false);
                 out.recycle();
                 return new Backdrop(null, frost, null, wide, light, lightGlass, night, nightGlass, lightBg, nightBg, GW, GH);
@@ -111,6 +118,7 @@ final class Backdrop {
             return new Backdrop(null, frost, null, wide, light, lightGlass, night, nightGlass);
         }
 
+        Canvas c = new Canvas(out);
         float boost = Math.max(0, Math.min(0.3f, (luminance(out, 0, 0.22f, 0.5f, 0.62f) - 0.22f) * 1.1f));
         Paint scrim = new Paint(Paint.DITHER_FLAG);
         scrim.setShader(new LinearGradient(0, 0, W * 0.68f, 0,
@@ -247,12 +255,18 @@ final class Backdrop {
     /** Blends with a near-black (the darkest gray of Apple's dark-mode backgrounds), keeping the photo's tint. */
     private static int[] darken(int[] px, float amount) {
         float keep = 1 - amount, base = 11 * amount;
+        int[] rg = new int[256], bl = new int[256];
+        for (int v = 0; v < 256; v++) {
+            rg[v] = Math.round(v * keep + base);
+            bl[v] = Math.round(v * keep + base + 2 * amount);
+        }
+        return tone(px, rg, bl);
+    }
+
+    private static int[] tone(int[] px, int[] rg, int[] bl) {
         for (int i = 0; i < px.length; i++) {
             int p = px[i];
-            int r = Math.round(((p >> 16) & 255) * keep + base);
-            int g = Math.round(((p >> 8) & 255) * keep + base);
-            int b = Math.round((p & 255) * keep + base + 2 * amount);
-            px[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+            px[i] = 0xFF000000 | (rg[(p >> 16) & 255] << 16) | (rg[(p >> 8) & 255] << 8) | bl[p & 255];
         }
         return px;
     }
@@ -271,18 +285,21 @@ final class Backdrop {
     }
 
     private static int[] whiten(int[] px, float amount) {
-        for (int i = 0; i < px.length; i++) {
-            int p = px[i];
-            int r = Math.round(((p >> 16) & 255) * (1 - amount) + 255 * amount);
-            int g = Math.round(((p >> 8) & 255) * (1 - amount) + 255 * amount);
-            int b = Math.round((p & 255) * (1 - amount) + 255 * amount);
-            px[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
-        }
-        return px;
+        int[] t = new int[256];
+        for (int v = 0; v < 256; v++) t[v] = Math.round(v * (1 - amount) + 255 * amount);
+        return tone(px, t, t);
     }
 
     /** Halved at each step (a true average, no aliasing), then blurred (box passes of radius r). */
     private static int[] reduce(Bitmap full, int w, int h, int radius, int passes) {
+        Bitmap small = shrink(full, w, h);
+        int[] px = pixels(small, w, h);
+        if (small != full) small.recycle();
+        return blur(px, w, h, radius, passes);
+    }
+
+    /** Halved while that keeps it over 1.5× the size, then filtered to w × h. */
+    private static Bitmap shrink(Bitmap full, int w, int h) {
         Bitmap b = full;
         while (b.getWidth() / 2 >= w * 1.5f) {
             Bitmap half = Bitmap.createScaledBitmap(b, b.getWidth() / 2, b.getHeight() / 2, true);
@@ -290,10 +307,17 @@ final class Backdrop {
             b = half;
         }
         Bitmap small = Bitmap.createScaledBitmap(b, w, h, true);
-        if (b != full) b.recycle();
+        if (b != full && b != small) b.recycle();
+        return small;
+    }
+
+    private static int[] pixels(Bitmap b, int w, int h) {
         int[] px = new int[w * h];
-        small.getPixels(px, 0, w, 0, 0, w, h);
-        small.recycle();
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        return px;
+    }
+
+    private static int[] blur(int[] px, int w, int h, int radius, int passes) {
         int[] tmp = new int[px.length];
         for (int pass = 0; pass < passes; pass++) {
             box(px, tmp, w, h, radius, true);
@@ -302,25 +326,28 @@ final class Backdrop {
         return px;
     }
 
-    /** Moving average of radius r in one direction, repeating the edge pixels. */
+    /** Moving average of radius r in one direction, repeating the edge pixels (integer sums, 16-bit fixed point). */
     private static void box(int[] in, int[] out, int w, int h, int r, boolean horizontal) {
         int n = horizontal ? w : h, lines = horizontal ? h : w, step = horizontal ? 1 : w, lineStep = horizontal ? w : 1;
-        float k = 1f / (2 * r + 1);
+        int k = 65536 / (2 * r + 1), last = (n - 1) * step;
         for (int line = 0; line < lines; line++) {
             int base = line * lineStep;
-            float sr = 0, sg = 0, sb = 0;
+            int sr = 0, sg = 0, sb = 0;
             for (int i = -r; i <= r; i++) {
                 int p = in[base + Math.max(0, Math.min(n - 1, i)) * step];
                 sr += (p >> 16) & 255;
                 sg += (p >> 8) & 255;
                 sb += p & 255;
             }
-            for (int i = 0; i < n; i++) {
-                out[base + i * step] = 0xFF000000 | (Math.round(sr * k) << 16) | (Math.round(sg * k) << 8) | Math.round(sb * k);
-                int add = in[base + Math.min(n - 1, i + r + 1) * step], sub = in[base + Math.max(0, i - r) * step];
+            int addAt = base + (r + 1) * step, subAt = base, end = base + last;
+            for (int i = 0, o = base; i < n; i++, o += step) {
+                out[o] = 0xFF000000 | (((sr * k + 32768) >> 16) << 16) | (((sg * k + 32768) >> 16) << 8) | ((sb * k + 32768) >> 16);
+                int add = in[Math.min(end, addAt)], sub = in[subAt];
                 sr += ((add >> 16) & 255) - ((sub >> 16) & 255);
                 sg += ((add >> 8) & 255) - ((sub >> 8) & 255);
                 sb += (add & 255) - (sub & 255);
+                addAt += step;
+                if (i >= r) subAt += step;
             }
         }
     }

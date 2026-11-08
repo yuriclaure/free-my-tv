@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- channel4: Simple Icons (CC0). White, on the app's colour (SwitcherActivity). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="m 14.309 0 -.33 .412 v 4.201 l 2.382 -2.95 z m -1.155 1.201 L 10.707 4.22 v 8.674 h 2.447 z m 3.268 1.701 -2.443 3.02 v 14.81 h 2.443 z M 9.887 5.236 l -6.201 7.657 h 3.142 L 9.887 9.12 Z m -6.766 8.48 v 2.444 h 10.033 v -2.443 Z m 14.125 0 v 2.444 h 3.633 v -2.443 Z m -6.539 3.268 V 24 h 2.443 v -7.016 Z m -3.271 4.573 V 24 h 2.443 v -2.443 z m 6.543 0 V 24 h 5.189 v -2.443 z" />
+</vector>

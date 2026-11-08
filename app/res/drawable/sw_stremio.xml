@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- stremio: Simple Icons (CC0). White, on the app's colour (SwitcherActivity). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M 12 0 a 1.2 1.2 0 0 0 -.85 .354 L .353 11.15 c -.47 .47 -.47 1.227 0 1.697 L 11.15 23.647 a 1.2 1.2 0 0 0 1.7 0 l 10.797 -10.8 c .47 -.47 .47 -1.226 0 -1.696 L 12.85 .354 A 1.2 1.2 0 0 0 12 0 z m -1.674 7.586 a .2 .2 0 0 1 .002 0 .2 .2 0 0 1 .129 .04 l 5.729 4.214 a .2 .2 0 0 1 0 .323 l -5.73 4.213 a .2 .2 0 0 1 -.317 -.16 v -8.43 a .2 .2 0 0 1 .187 -.2 z" />
+</vector>

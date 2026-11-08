@@ -678,6 +678,7 @@ final class HomeMode {
                 }
             }
             wakeWatch(adb, true);
+            remoteWatch(adb, remoteFixOn());
             notice(c, Capabilities.screensaver(c)
                     ? Ui.trf("Free My TV is on: new home screen and screensaver, {n} apps turned off.", "n", disabled.size())
                     : Ui.trf("Free My TV is on: new home screen, {n} apps turned off.", "n", disabled.size()));
@@ -740,6 +741,7 @@ final class HomeMode {
                 AppLog.w("remote buttons service: " + e.getMessage());
             }
             wakeWatch(adb, false);
+            remoteWatch(adb, false);
             SleepTimer.stop(c);
             adb.shell("appops set " + PKG + " SYSTEM_ALERT_WINDOW default");   // SleepOverlay's, if it was allowed
             Capabilities.forget(c, Capabilities.OVERLAY);                       // asked again next time
@@ -882,6 +884,7 @@ final class HomeMode {
                 // The screensaver first: if that fails, the revert isn't marked done and the next try does it again.
                 restoreScreensaver(adb, s);
                 wakeWatch(adb, false);
+                remoteWatch(adb, false);
                 SleepTimer.stop(app);   // its row shows Unavailable from now on
                 try {
                     nowPlaying(app, adb, false);   // and so does Now Playing's
@@ -1043,6 +1046,7 @@ final class HomeMode {
                     fixed.add(Ui.tr("the home screen"));
                 }
                 wakeWatch(adb, !reverted);   // again after a restart, which ends it (running already: left alone)
+                remoteWatch(adb, !reverted && remoteFixOn());
                 // Whole component names: ".ScreensaverAlone" (Android 11 to 12L) contains ".Screensaver" (the others).
                 List<String> savers = Arrays.asList(adb.shell("settings get secure screensaver_components").trim().split(","));
                 if (Config.SCREENSAVER && !reverted && !savers.contains(DREAM)) {
@@ -1178,6 +1182,65 @@ final class HomeMode {
     /** Only process numbers count: a TV without pgrep answers with an error. */
     private static boolean wakeRunning(Adb adb) throws IOException {
         return adb.shell("pgrep -f " + WAKE_MATCH).trim().matches("\\d+(\\s+\\d+)*");
+    }
+
+    // MARK: - A stuck remote (Home Settings: Stuck remote warning)
+
+    /**
+     * Bluetooth remotes (a Sony BRAVIA's "SONY TV VRC 001", Android 9) can come back from a dropped connection half
+     * connected: the TV shows the remote as connected, but its buttons arrive on the voice channel, where Google's
+     * remote service logs "Received audio stop frame while there is no ongoing mic session" for each press and does
+     * nothing with them, as when its push-to-talk mic button is held down (a stuck button: restarting the remote or the
+     * TV's Bluetooth doesn't help then). This loop, in adb's shell (like the wake watch), waits for that line: three within
+     * 10 seconds, at most once every 5 minutes, and it asks RemoteFix (a receiver only the shell may call) to say so on the
+     * home screen. It runs while the row is on, in Free My TV mode;
+     * the switch and the boot check start it, Original and the watchdog's revert stop it.
+     */
+    private static final String REMOTE_WATCH = "freemytv-remote";
+    private static final String REMOTE_MATCH = "'freemytv-remot[e]'";
+    private static final String REMOTE_LOOP = "trap \"\" HUP; logcat -b main -T 1 -s AtvRemote.VoiceOverBle:W " + REMOTE_WATCH + ":S"
+            + " | { a=0; b=0; last=0; while read -r line; do case \"$line\" in *\"no ongoing mic session\"*)"
+            + " now=$(date +%s); if [ $((now - a)) -le 10 ] && [ $((now - last)) -ge 300 ]; then last=$now;"
+            + " am broadcast -n " + PKG + "/.RemoteFix >/dev/null 2>&1; fi; a=$b; b=$now;; esac; done; }";
+
+    static void remoteFixWatch(Context c) {
+        ModeJob.schedule(c, ModeJob.REMOTE_FIX, null, 0);
+    }
+
+    static void remoteFixWatchNow(Context app) {
+        synchronized (RUN) {   // after a switch or a revert, never in the middle of one
+            JSONObject s = state(app);
+            boolean on = remoteFixOn() && FREE.equals(s.optString("mode")) && !s.optBoolean("homeReverted");
+            try (Adb adb = Adb.connect(app, 10_000, null)) {
+                remoteWatch(adb, on);
+            } catch (IOException e) {
+                AppLog.w("remote fix: " + e.getMessage());
+            }
+        }
+    }
+
+    /** The row as Home Settings (:home) saved it. */
+    private static boolean remoteFixOn() {
+        Prefs.reload();
+        return Prefs.remoteFix();
+    }
+
+    /** Starts the loop, once, or stops it. Only logs: what called it goes on either way. */
+    private static void remoteWatch(Adb adb, boolean on) {
+        try {
+            boolean running = adb.shell("pgrep -f " + REMOTE_MATCH).trim().matches("\\d+(\\s+\\d+)*");
+            if (!on) {
+                if (!running) return;
+                adb.shell("pkill -f " + REMOTE_MATCH);
+                AppLog.w("remote fix off");
+                return;
+            }
+            if (running) return;
+            adb.shell("trap \"\" HUP; setsid sh -c '" + REMOTE_LOOP + "' " + REMOTE_WATCH + " </dev/null >/dev/null 2>&1 &");
+            AppLog.w("remote fix on: the home screen warns when the remote's buttons stop getting through");
+        } catch (IOException e) {
+            AppLog.w("remote fix: " + e.getMessage());
+        }
     }
 
     // MARK: - Continue Watching's permission

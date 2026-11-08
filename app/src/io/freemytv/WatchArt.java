@@ -43,7 +43,7 @@ final class WatchArt {
     private final Runnable onLoaded;
     private final Handler main = new Handler(Looper.getMainLooper());
     /** One thread for the whole process: a home screen started over (new settings) doesn't leave one behind. */
-    private static final ExecutorService IO = Executors.newSingleThreadExecutor();
+    private static final ExecutorService IO = Ui.background(1);
     private volatile boolean closed;
     private volatile int pw = W, ph = H;   // the pictures' size in pixels
     private static final long RETRY_MS = 10 * 60_000L;

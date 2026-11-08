@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BBC iPlayer symbol (2021), from Wikimedia Commons. White, on the app's colour (SwitcherActivity). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="110dp"
+    android:viewportWidth="646.15"
+    android:viewportHeight="738.131">
+    <group android:translateX="-675.73297" android:translateY="-169.73623">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M 675.73297 315.85452 V 761.48152 H 830.85541 V 315.85452 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M 1244.322 553.91592 863.94353 773.52725 941.50479 907.86727 1321.8832 688.25577 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M 1244.322 523.68758 863.94353 304.07625 941.50479 169.73623 1321.8832 389.34773 Z" />
+    </group>
+</vector>

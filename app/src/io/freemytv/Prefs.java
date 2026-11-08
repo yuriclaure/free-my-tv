@@ -299,18 +299,90 @@ final class Prefs {
     static boolean saverWatch() { return sp().getBoolean("saverWatch", false); }
     static void setSaverWatch(boolean on) { put("saverWatch", on); }
 
+    // MARK: - Aerial screensaver (Home Settings > Screensaver, and its Aerial videos screen)
+
+    static final String SAVER_PICKS = "picks", SAVER_AERIAL = "aerial";
+
+    /** What the screensaver shows: the picks (or your photos, My Photos), or the Aerial Views videos. */
+    static String saverSource() {
+        return SAVER_AERIAL.equals(sp().getString("saverSource", SAVER_PICKS)) ? SAVER_AERIAL : SAVER_PICKS;
+    }
+
+    static void setSaverSource(String v) { put("saverSource", v); }
+
+    /** Where the videos come from (aerial.json's "s") and what they show ("c"): each on or off. */
+    static final String[] AERIAL_SOURCES = {"apple", "amazon", "community"};
+    static final String[] AERIAL_SCENES = {"city", "land", "space", "sea", "abstract"};
+
+    /** A source or scene on: all of them at first except the abstract loops, which aren't aerials. */
+    static boolean aerialOn(String key) { return sp().getBoolean("aerial_" + key, !"abstract".equals(key)); }
+
+    static void setAerialOn(String key, boolean on) { put("aerial_" + key, on); }
+
+    /** "any" time of day, or "match": night videos at night, the others by day. */
+    static final String[] AERIAL_TIMES = {"any", "match"};
+
+    static String aerialTime() { return "match".equals(sp().getString("aerialTime", "any")) ? "match" : "any"; }
+
+    static void setAerialTime(String v) { put("aerialTime", v); }
+
+    /** Which file of each video: 0 = 1080p H.264 (any TV), 1 = 1080p HEVC (smaller, the default), 2 = 4K HEVC. */
+    static int aerialQuality() { return Math.max(0, Math.min(2, sp().getInt("aerialQuality", 1))); }
+
+    static void setAerialQuality(int v) { put("aerialQuality", v); }
+
+    /** The place and Apple's caption in the bottom left. */
+    static boolean aerialCaptions() { return sp().getBoolean("aerialCaptions", true); }
+
+    static void setAerialCaptions(boolean on) { put("aerialCaptions", on); }
+
+    /** What's playing (a music app) in the top right. */
+    static boolean aerialMusic() { return sp().getBoolean("aerialMusic", true); }
+
+    static void setAerialMusic(boolean on) { put("aerialMusic", on); }
+
+    /** Videos never to show again (their aerial.json "i"), from the screensaver's info panel; Settings lists them. */
+    /**
+     * The screensaver's videos in their shuffled order (ids, comma-separated) and how far into it it got: it goes on
+     * from there next time, so every video shows once before any repeats (AerialSaver).
+     */
+    static String aerialDeck() { return sp().getString("aerialDeck", ""); }
+    static int aerialDeckAt() { return sp().getInt("aerialDeckAt", 0); }
+    static void setAerialDeck(String ids, int at) {
+        sp().edit().putString("aerialDeck", ids).putInt("aerialDeckAt", at).apply();
+    }
+
+    static java.util.Set<String> aerialHidden() {
+        return new java.util.HashSet<>(sp().getStringSet("aerialHidden", new java.util.HashSet<>()));
+    }
+
+    static void setAerialHidden(java.util.Set<String> ids) {
+        sp().edit().putStringSet("aerialHidden", new java.util.HashSet<>(ids)).apply();
+        version++;
+    }
+
     // MARK: - Top of the home screen
 
-    static final String TOP_PICKS = "picks", TOP_CONTINUE = "continue", TOP_NONE = "none";
-    static final String[] TOP_CONTENT = {TOP_PICKS, TOP_CONTINUE, TOP_NONE};
+    static final String TOP_PICKS = "picks", TOP_BOTH = "both", TOP_CONTINUE = "continue", TOP_NONE = "none";
+    static final String[] TOP_CONTENT = {TOP_PICKS, TOP_BOTH, TOP_CONTINUE, TOP_NONE};
 
     /** What the cards under the title show: the recommendations (TMDB), what you were watching in your apps, or nothing. */
     static String topContent() {
         String v = sp().getString("topContent", TOP_PICKS);
-        return v.equals(TOP_CONTINUE) || v.equals(TOP_NONE) ? v : TOP_PICKS;
+        return v.equals(TOP_CONTINUE) || v.equals(TOP_NONE) || v.equals(TOP_BOTH) ? v : TOP_PICKS;
     }
 
     static void setTopContent(String v) { put("topContent", v); }
+
+    /** Continue Watching on its own or as the first tab beside the picks: either one reads the Watch Next list. */
+    static boolean watchShown(String top) {
+        return top.equals(TOP_CONTINUE) || top.equals(TOP_BOTH);
+    }
+
+    /** The picks show (on their own or beside Continue Watching). */
+    static boolean picksShown(String top) {
+        return top.equals(TOP_PICKS) || top.equals(TOP_BOTH);
+    }
 
     /** Apps left out of Continue Watching (Settings), by package. */
     static Set<String> watchOff() { return new HashSet<>(sp().getStringSet("watchOff", new HashSet<>())); }
@@ -349,6 +421,13 @@ final class Prefs {
     /** The weather card's forecast: "hours" (the next 6 hours) or "days" (the next 5 days). */
     static String forecast() { return "days".equals(sp().getString("forecast", "hours")) ? "days" : "hours"; }
     static void setForecast(String v) { put("forecast", v); }
+
+    /** Home Settings' "Stuck remote warning" (off by default; RemoteFix). */
+    static boolean remoteFix() { return sp().getBoolean("remoteFix", false); }
+    static void setRemoteFix(boolean on) {   // committed: the main process starts or stops its watcher right away
+        sp().edit().putBoolean("remoteFix", on).commit();
+        version++;
+    }
 
     static boolean nowPlaying() { return sp().getBoolean("nowPlaying", false); }
     static void setNowPlaying(boolean on) {   // committed: the main process reads it right away to allow the listener

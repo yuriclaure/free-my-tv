@@ -75,12 +75,22 @@ final class WatchNext {
 
     /** Everything to show, newest first (off the main thread: these are content provider queries). */
     static List<Item> load(Context c) {
-        if (!allowed(c)) return Collections.emptyList();
-        ContentResolver cr = c.getContentResolver();
-        List<Item> all = new ArrayList<>(read(cr, TvContract.WatchNextPrograms.CONTENT_URI));
-        for (long channel : continueChannels(cr, c.getPackageName())) {
-            all.addAll(read(cr, TvContract.buildPreviewProgramsUriForChannel(channel)));
+        List<Item> all = new ArrayList<>();
+        if (allowed(c)) {
+            ContentResolver cr = c.getContentResolver();
+            all.addAll(read(cr, TvContract.WatchNextPrograms.CONTENT_URI));
+            for (long channel : continueChannels(cr, c.getPackageName())) {
+                all.addAll(read(cr, TvContract.buildPreviewProgramsUriForChannel(channel)));
+            }
+            logSources(cr, all);
         }
+        // Netflix doesn't write the TV's list here: its titles come from the account signed in on the TV (NetflixWatch),
+        // in place of any it might write.
+        if (NetflixWatch.signedIn(c)) {
+            for (java.util.Iterator<Item> i = all.iterator(); i.hasNext(); ) if (NetflixWatch.PKG.equals(i.next().pkg)) i.remove();
+            all.addAll(NetflixWatch.items(c));
+        }
+        if (all.isEmpty()) return Collections.emptyList();
         Set<String> off = Prefs.watchOff(), hidden = Prefs.watchHidden();
         for (java.util.Iterator<Item> i = all.iterator(); i.hasNext(); ) {
             Item it = i.next();
@@ -93,7 +103,7 @@ final class WatchNext {
         for (Item it : all) {
             String key = it.pkg + "|" + (it.intent != null ? it.intent : it.title);
             int n = perApp.containsKey(it.pkg) ? perApp.get(it.pkg) : 0;
-            if (n >= PER_APP || !seen.add(key)) continue;
+            if (n >= (NetflixWatch.PKG.equals(it.pkg) ? NetflixWatch.MAX : PER_APP) || !seen.add(key)) continue;
             perApp.put(it.pkg, n + 1);
             it.app = appName(c, it.pkg);
             out.add(it);
@@ -165,6 +175,31 @@ final class WatchNext {
         } catch (PackageManager.NameNotFoundException e) {
             return "";
         }
+    }
+
+    private static String lastSources = "";
+
+    /**
+     * For "why isn't my app here?": how many entries each app wrote, and the home screen channels apps publish (by
+     * name), in the log when that changes. Only counts and channel names, never titles.
+     */
+    private static void logSources(ContentResolver cr, List<Item> all) {
+        Map<String, Integer> counts = new java.util.TreeMap<>();
+        for (Item it : all) counts.put(it.pkg, counts.containsKey(it.pkg) ? counts.get(it.pkg) + 1 : 1);
+        StringBuilder channels = new StringBuilder();
+        try (Cursor cur = cr.query(TvContract.Channels.CONTENT_URI, new String[] {TvContract.Channels.COLUMN_PACKAGE_NAME,
+                TvContract.Channels.COLUMN_DISPLAY_NAME, TvContract.Channels.COLUMN_TYPE}, null, null, null)) {
+            while (cur != null && cur.moveToNext()) {
+                if (!TvContract.Channels.TYPE_PREVIEW.equals(cur.getString(2))) continue;
+                channels.append(channels.length() > 0 ? ", " : "").append(cur.getString(0)).append(" “").append(cur.getString(1)).append('”');
+            }
+        } catch (RuntimeException e) {
+            channels.append("unreadable: ").append(e.getMessage());
+        }
+        String line = "continue watching sources: " + counts + "; home screen channels: " + channels;
+        if (line.equals(lastSources)) return;
+        lastSources = line;
+        AppLog.w(line);
     }
 
     private static List<Long> continueChannels(ContentResolver cr, String self) {

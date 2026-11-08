@@ -40,6 +40,8 @@ final class KeyPage {
         void checking();
         /** Checks the key and saves it: null when it's saved, else why not (the phone shows it too). */
         String accept(String key, boolean watchmode);
+        /** Netflix's page: checks the session's two cookies with Netflix and keeps them: null when saved, else why not. */
+        default String acceptNetflix(String netflixId, String secureNetflixId) { return "unsupported"; }
         /** The page stopped: after the key, after 5 minutes (expired) or close(). Called once. */
         void closed(KeyPage page, boolean expired);
     }
@@ -54,13 +56,24 @@ final class KeyPage {
     private final String path;
     private final Listener listener;
     private final boolean watchmode;   // the Watchmode key's page, else TMDB's
+    private final boolean netflix;     // the Netflix account's page (a netflix.com session's two cookies, not a key)
     private final AtomicBoolean taken = new AtomicBoolean();      // a key came: the one this page takes
     private final AtomicInteger answering = new AtomicInteger();   // connections being answered
     private volatile boolean closed;
 
     KeyPage(InetAddress lan, boolean watchmode, Listener listener) throws IOException {
+        this(lan, watchmode, false, listener);
+    }
+
+    /** Netflix's page: its form asks for a netflix.com session's two cookies. */
+    static KeyPage netflix(InetAddress lan, Listener listener) throws IOException {
+        return new KeyPage(lan, false, true, listener);
+    }
+
+    private KeyPage(InetAddress lan, boolean watchmode, boolean netflix, Listener listener) throws IOException {
         this.listener = listener;
         this.watchmode = watchmode;
+        this.netflix = netflix;
         byte[] random = new byte[12];
         new SecureRandom().nextBytes(random);
         path = "/" + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
@@ -198,7 +211,9 @@ final class KeyPage {
             return false;
         }
         listener.checking();
-        String why = listener.accept(field(new String(body, StandardCharsets.US_ASCII), "key"), watchmode);
+        String form = new String(body, StandardCharsets.US_ASCII);
+        String why = netflix ? listener.acceptNetflix(field(form, "netflixid"), field(form, "securenetflixid"))
+                : listener.accept(field(form, "key"), watchmode);
         respond(out, "200 OK", "text/html; charset=utf-8", result(why));
         return true;
     }
@@ -259,6 +274,20 @@ final class KeyPage {
     /** How to get a key, then the field to paste it in. */
     private byte[] form() {
         StringBuilder b = top();
+        if (netflix) {
+            b.append("<p>").append(esc(Ui.tr("Netflix doesn't share its Continue Watching with this TV. With your netflix.com session, the TV reads it from your account, and only that.")))
+                    .append("</p><p>").append(esc(Ui.tr("On a computer (it takes a minute):"))).append("</p><ol><li>")
+                    .append(esc(Ui.tr("Sign in at netflix.com and choose your profile."))).append("</li><li>")
+                    .append(esc(Ui.tr("Open the browser's developer tools: Application (Chrome, Edge) or Storage (Firefox, Safari) → Cookies → https://www.netflix.com."))).append("</li><li>")
+                    .append(esc(Ui.tr("Copy the values of NetflixId and SecureNetflixId here:"))).append("</li></ol>")
+                    .append("<form method=post action=\"").append(path).append("\">")
+                    .append("<label>NetflixId<textarea name=netflixid rows=3 required autocomplete=off autocapitalize=off autocorrect=off spellcheck=false></textarea></label>")
+                    .append("<label>SecureNetflixId<textarea name=securenetflixid rows=3 required autocomplete=off autocapitalize=off autocorrect=off spellcheck=false></textarea></label>")
+                    .append("<button>").append(esc(Ui.tr("Send to the TV"))).append("</button></form><p class=s>")
+                    .append(esc(Ui.tr("They stay on your TV, which uses them only to read what you're watching. Signing out of all devices on Netflix ends them. This page works once, for 5 minutes.")))
+                    .append("</p>");
+            return bottom(b);
+        }
         if (watchmode) {
             b.append("<p>").append(esc(Ui.tr("The key makes a pick open the title's page in its app, where the app allows it.")))
                     .append("</p><p>").append(esc(Ui.tr("Free, and it takes two minutes:"))).append("</p><ol><li>")
@@ -288,7 +317,9 @@ final class KeyPage {
 
     private byte[] result(String why) {
         StringBuilder b = top();
-        if (why == null) {
+        if (why == null && netflix) {
+            b.append("<p class=ok>").append(esc(Ui.tr("Saved on the TV. Netflix's titles arrive in Continue Watching in a moment."))).append("</p>");
+        } else if (why == null) {
             b.append("<p class=ok>").append(esc(Ui.tr("Saved on the TV. You can close this page."))).append("</p>");
         } else {
             b.append("<p class=no>").append(esc(why)).append("</p><p>")
@@ -304,11 +335,13 @@ final class KeyPage {
                 .append("body{margin:0 auto;max-width:34em;padding:24px;font:17px/1.5 system-ui,-apple-system,sans-serif;")
                 .append("background:#1c1c1e;color:#f5f5f7}h1{font-size:24px}li{margin:.3em 0}a{color:#9fd3ff}")
                 .append("textarea{box-sizing:border-box;width:100%;font:15px monospace;padding:10px;border-radius:10px;border:0}")
+                .append("label{display:block;margin:14px 0 4px}input{box-sizing:border-box;display:block;width:100%;margin-top:6px;")
+                .append("font:17px system-ui,sans-serif;padding:12px;border-radius:10px;border:0}")
                 .append("button,.b{display:block;box-sizing:border-box;width:100%;margin:14px 0;padding:14px;border:0;")
                 .append("border-radius:12px;background:#f5f5f7;color:#1c1c1e;font:600 17px system-ui,sans-serif;text-align:center;")
                 .append("text-decoration:none}.b{background:#3a3a3c;color:#f5f5f7}.s{color:#98989d;font-size:15px}")
                 .append(".ok{color:#7ee08a;font-size:20px}.no{color:#ffc266;font-size:20px}</style>")
-                .append("<h1>").append(esc(watchmode ? Ui.tr("Watchmode key") : Ui.tr("TMDB key"))).append(" · Free My TV</h1>");
+                .append("<h1>").append(esc(netflix ? "Netflix" : watchmode ? Ui.tr("Watchmode key") : Ui.tr("TMDB key"))).append(" · Free My TV</h1>");
     }
 
     private static byte[] bottom(StringBuilder b) {
