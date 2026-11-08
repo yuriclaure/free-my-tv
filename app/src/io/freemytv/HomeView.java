@@ -896,6 +896,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         cancelReorder(!animated);
         closeMenu(!animated);
         if (recents != null) recents.close();   // Home closes Recent Apps too (twice opens it: HomeActivity)
+        closeSearch(animated);
         zone = Z_SHELF;
         shelfIndex = 0;
         cardIndex = 0;
@@ -921,7 +922,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void setLightButtons(List<HomeApps.Item> list) {
         if (reorderTop) cancelReorder(true);
         lightButtons.clear();
-        lightButtons.addAll(list);
+        for (HomeApps.Item it : list) if (it.kind != HomeApps.SEARCH || picksMode()) lightButtons.add(it);   // search's results are cards
         if (zone == Z_TOP && topIndex >= TABS + lightButtons.size()) {
             topIndex = 2 + lightButtons.size();
             if (topIndex < TABS && !picksOn()) zone = Z_SHELF;   // without the picks the tabs can't hold focus
@@ -963,7 +964,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** The Continue Watching tab is the one showing (Continue Watching and Picks). */
     private boolean watchTab() {
-        return bothMode() && WATCH_TAB.equals(tabKind(tab));
+        return !searchOpen && bothMode() && WATCH_TAB.equals(tabKind(tab));
     }
 
     /** Music is playing (or paused) in an app: Continue Watching and Picks gets a Now Playing tab, first. */
@@ -973,7 +974,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** The Now Playing tab is the one showing. */
     private boolean musicTab() {
-        return musicShown() && tab == 0;
+        return !searchOpen && musicShown() && tab == 0;
     }
 
     @Override public void onData() {
@@ -1195,6 +1196,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         cardsLoading = false;   // the next draw sets it again while a card still waits
         boolean topMoving = step(topFocus, dt) | topReorderFrame, cardsMoving = step(cardFocus, dt) | step(cardOpen, dt) | cardScroll.step(dt)
                 | step(watchFocus, dt) | watchScroll.step(dt) | step(musicFocus, dt);
+        boolean searchMoving = searchShow.step(dt) | searching | hearing;
+        hearShown += (hearLevel - hearShown) * Math.min(1, dt * 12);
+        if (searchMoving || searchWasMoving) {
+            // The bar grows out of the button (and its ring turns while it searches), the clock and the tabs give way;
+            // once more as it settles, so the last frame is the finished one.
+            heroDirty = statusDirty = true;
+        }
+        searchWasMoving = searchMoving;
         boolean tintMoving = tintMix.step(dt);
         if (tintMoving) {
             sky.invalidate();
@@ -1269,7 +1278,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Busy: something is moving, or the sheet or the drawer is open.
         boolean busy = tilesMoving || statusMoving || heroMoving || drawerItemsMoving || gridMoving || drawerMoving
                 || menuMoving || sheetMoving || toastFading || heroFading || bgFading || nightMoving || tintMoving || sheetOpen
-                || sheet.value > 0.001f || recentMoving || drawerOpen || drawer.value > 0.001f || toast != null || !toasts.isEmpty();
+                || sheet.value > 0.001f || recentMoving || drawerOpen || drawer.value > 0.001f || toast != null || !toasts.isEmpty()
+                || searchMoving;
         idle = !busy;
         if (busy) Choreographer.getInstance().postFrameCallback(this);
         else Choreographer.getInstance().postFrameCallbackDelayed(this, barsLive ? 1000 / BARS_FPS : 1000);
@@ -2222,6 +2232,42 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.restore();
     }
 
+    /** coverImage in black and white while it's set (search's titles none of your apps has). */
+    private boolean grayImage;
+    private static final android.graphics.ColorMatrixColorFilter GRAY;
+    static {
+        android.graphics.ColorMatrix m = new android.graphics.ColorMatrix();
+        m.setSaturation(0);
+        GRAY = new android.graphics.ColorMatrixColorFilter(m);
+    }
+
+    /**
+     * Search: "Not on your apps" on the card itself, a dark capsule in its top left (the card at `cell`, grown by `s`).
+     * Laid out once at its resting size and scaled with the card: a new text size on each frame of the focus made the
+     * text jump as the card settled.
+     */
+    private void drawNotOnPill(Canvas c, float s) {
+        if (lNotOn == null || lNotOn.getTextSize() != 22 * k || !notOnText.equals(Ui.tr("Not on your apps"))) {
+            lNotOn = Ui.text(Ui.semibold, 22 * k, 0xFFFFFFFF);
+            notOnText = Ui.tr("Not on your apps");
+            notOnWidth = lNotOn.measureText(notOnText);
+        }
+        float h = 46 * k, w = notOnWidth + 32 * k, l = cell.left + 16 * k * s, t = cell.top + 16 * k * s;
+        c.save();
+        c.translate(l, t);
+        c.scale(s, s);
+        tmp.set(0, 0, w, h);
+        fill.setShader(null);
+        fill.setColor(0xB3141518);
+        c.drawRoundRect(tmp, h / 2, h / 2, fill);
+        c.drawText(notOnText, 16 * k, h / 2 + Ui.halfCap(lNotOn), lNotOn);
+        c.restore();
+    }
+
+    private Paint lNotOn;
+    private String notOnText = "";
+    private float notOnWidth;
+
     /** The image cropped at the center to the cell's shape (not stretched), at `alpha`. */
     private void coverImage(Canvas c, Bitmap image, BitmapShader shader, RectF cell, float r, float alpha) {
         float iw = image.getWidth(), ih = image.getHeight();
@@ -2233,7 +2279,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         c.translate(-sl, 0);
         imageFill.setShader(shader);
         imageFill.setAlpha(Math.round(255 * alpha));
+        if (grayImage) imageFill.setColorFilter(GRAY);
         c.drawRoundRect(sl, 0, sl + sw, ih, r / sx, r / sy, imageFill);
+        imageFill.setColorFilter(null);
         imageFill.setAlpha(255);
         imageFill.setShader(null);
         c.restore();
@@ -3179,6 +3227,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** A mouse (or a touch screen) clicks what is under it, like OK on the focused item. */
     @Override public boolean onTouchEvent(MotionEvent e) {
+        if (searchOpen) return true;
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 touchX = e.getX();
@@ -3194,12 +3243,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** A mouse moves the focus to what is under the pointer, like a trackpad on tvOS. */
     @Override public boolean onHoverEvent(MotionEvent e) {
+        if (searchOpen) return true;
         if (e.getActionMasked() == MotionEvent.ACTION_HOVER_MOVE) hover(e.getX(), e.getY());
         return true;
     }
 
     /** The mouse wheel moves through the shelf, the cards, the drawer and All Apps. */
     @Override public boolean onGenericMotionEvent(MotionEvent e) {
+        if (searchOpen) return true;
         if (e.getActionMasked() == MotionEvent.ACTION_SCROLL) {
             float v = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
             if (v != 0) {
@@ -3482,6 +3533,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (!recents.visible() || recents.count() == 0) spoken.readAgain();
             return handled;
         }
+        if (searchOpen && searchKey(e)) return true;
         if (down && e.getKeyCode() == KeyEvent.KEYCODE_APP_SWITCH && !Prefs.recents().equals("off")) {
             openRecents();
             return true;
@@ -3778,6 +3830,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             r = tileRects[shelfIndex];
         }
         click.open();
+        if (it.kind == HomeApps.SEARCH) {
+            openSearch();
+            return;
+        }
         if (it.kind == HomeApps.RECENTS) {
             openRecents();
             return;
@@ -4501,6 +4557,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The three cards of the current tab (Explore, Movies, Shows) and the background taken from the focused one. */
     private void updateCards() {
         cardSlots = Prefs.cards();
+        if (searchOpen) {   // the row is search's: the tab's cards come back when it closes
+            heroDirty = true;
+            return;
+        }
         if (!picksMode()) {
             // No picks on screen: no cards, and the plain gradient behind, or with the clock your photo if there is one.
             if (!cards.isEmpty()) cards = new ArrayList<>();
@@ -5492,6 +5552,16 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void drawLightTop(Canvas c) {
+        drawLightTopNow(c);
+        // Search's bar, over the clock: on this layer, as wide as the screen (the top buttons' layer is only their strip).
+        if (searchShow.value > 0.001f) {
+            for (int i = 0; i < lightButtons.size(); i++) if (lightButtons.get(i).kind == HomeApps.SEARCH) drawSearchBar(c, topRects[TABS + i]);
+        }
+        if (searchOpen) drawSearchNote(c);
+        if (searchOpen && accentOpen) drawAccents(c);   // over the cards
+    }
+
+    private void drawLightTopNow(Canvas c) {
         applyTone();
         if (clockMode()) {
             titleRight = 0;
@@ -5499,8 +5569,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (HomeData.coinCount() > 0 || playingTab != null) drawQuotes(c);
             return;
         }
+        boolean searchUp = searchOpen || searchShow.value > 0.01f;
         if (bothMode()) {
-            drawGlance(c);
+            if (searchShow.value < 0.5f) drawGlance(c);   // under the bar as it grows
         } else {
             String hello = picksMode() ? Ui.tr("For You") : Ui.tr("Continue Watching");
             c.drawText(hello, MARGIN * k - Ui.leftBearing(lTitle, hello), L_TITLE_BASE * k, lTitle);
@@ -5514,7 +5585,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Text tabs (the selected one in bold, in the main text color); with focus on the tabs, the selected one gets
         // the white pill with a shadow and grows a little (the tvOS focus).
         float focus = Ui.clamp(topFocus[tab].value);
-        for (int i = 0; i < tabCount(); i++) {
+        if (searchOpen) drawSearchKeys(c);
+        for (int i = 0; i < tabCount() && !searchUp; i++) {
             RectF r = topRects[i];
             if (i == tab && focus > 0.01f) {
                 float s = 1 + 0.05f * focus;
@@ -5543,7 +5615,8 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         layoutCards();
         int top = -1;
         int slots = cardSlots;   // the others aren't drawn: at 3, no card peeks in at the right edge
-        if (watchTab()) {   // as many as the Watch Next list has (the row scrolls), and no empty cards
+        if (searchUp) slots = Math.min(cards.size(), CARD_MAX);   // all of search's results, in a row that scrolls
+        else if (watchTab()) {   // as many as the Watch Next list has (the row scrolls), and no empty cards
             slots = cards.size();
             if (slots == 0 && watchLoaded) {
                 String text = watchAllowed ? Ui.tr("Nothing half-watched in your apps.")
@@ -5671,12 +5744,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         Bitmap img = b == null ? null : b.wide;
         Recs.Poster poster = recs.poster(p);
         float open = Ui.clamp(cardOpen[i].value);
+        float shown = 1;
+        grayImage = p != null && p.notOn;   // search: a title none of your apps has, in black and white
         if (poster != null) {   // narrow: the poster; as the card widens the backdrop fades in over it
             float back = img == null ? 0 : Ui.clamp((open - 0.1f) / 0.6f);
-            if (back < 0.999f) coverImage(c, poster.bitmap, poster.shader, cell, r, 1);   // not once the backdrop covers it
-            if (back > 0.001f) coverImage(c, img, b.wideShader, cell, r, back);
+            if (back < 0.999f) coverImage(c, poster.bitmap, poster.shader, cell, r, shown);   // not once the backdrop covers it
+            if (back > 0.001f) coverImage(c, img, b.wideShader, cell, r, back * shown);
         } else if (img != null) {
-            coverImage(c, img, b.wideShader, cell, r, 1);
+            coverImage(c, img, b.wideShader, cell, r, shown);
         } else {
             // Continue Watching: a title TMDB doesn't know (or whose backdrop is still coming) shows the app's picture.
             WatchNext.Item it = watchTab() && p != null && i < watching.size() ? watching.get(i) : null;
@@ -5697,7 +5772,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 }
             }
         }
-        if (p != null && p.logo != null && open > 0.02f) drawCardLogo(c, p, open, r);   // every tab: the opened card's logo
+        grayImage = false;
+        if (p != null && p.notOn) drawNotOnPill(c, s);
+        boolean choosing = searchOpen && searchZone == SZ_CHOOSE && i == cardIndex && p != null;
+        if (p != null && p.logo != null && open > 0.02f && !choosing) drawCardLogo(c, p, open, r);   // every tab: the opened card's logo
+        if (choosing) drawSearchChoice(c, p, r);
         if (f > 0.01f) {
             if (lightSheens.length != cardRects.length) {
                 lightSheens = new LinearGradient[cardRects.length];
@@ -5745,7 +5824,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             String pkg = p.servicePkg != null ? p.servicePkg : p.pkg, meta = p.meta;
             if (p.appLabel != null && pkg != null && meta != null && meta.endsWith(" · " + p.appLabel)) meta = meta.substring(0, meta.length() - p.appLabel.length() - 3);
             else if (p.appLabel != null && p.appLabel.equals(meta)) meta = "";
+            lineApps = searchOpen ? p.apps : null;   // search: every app that has it, stacked
             drawCardLine(c, p.title, pkg, scoredMeta(meta, p.audience), p.tag, cardLines[i].left, cardLines[i].right, base.bottom, open, p.audience);
+            lineApps = null;
         }
     }
 
@@ -5820,6 +5901,836 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * right edge (`wide` on the opened card: episode and time left, or genre and length; `narrow` on a narrow one),
      * cross-fading as the card widens.
      */
+    // MARK: - Search
+    // The Search button (a top button): a light bar grows out of it across the top row, letters line up under it, and
+    // IMDb's titles come in as Explore's cards as you type, the ones on your apps first, each with every app that has
+    // it. OK on a card opens the choice of app inside the card; OK there opens the title in it.
+
+    private boolean searchOpen, searching, searchWasMoving;
+    // What the row says when it has no cards for what was typed: "No results for …" or that search couldn't reach
+    // IMDb (made once per answer, not per frame); null while there's nothing to say.
+    private String searchNote, searchNoteSub;
+    private int keyMode;   // KM_LETTERS, KM_NUMBERS, KM_SYMBOLS (Play/Pause goes round them, as on Apple TV)
+    private static final int KM_LETTERS = 0, KM_NUMBERS = 1, KM_SYMBOLS = 2;
+    // Holding OK on a letter: its accented forms above the keys (← → and OK pick one, Back leaves them).
+    private boolean accentOpen, accentHeld;
+    private int accentIndex;
+    private static final java.util.Map<String, String> ACCENTS = new java.util.HashMap<>();
+    static {
+        ACCENTS.put("a", "àáâäãåæ");
+        ACCENTS.put("c", "ç");
+        ACCENTS.put("e", "èéêë");
+        ACCENTS.put("i", "ìíîï");
+        ACCENTS.put("n", "ñ");
+        ACCENTS.put("o", "òóôöõøœ");
+        ACCENTS.put("s", "ß");
+        ACCENTS.put("u", "ùúûü");
+        ACCENTS.put("y", "ýÿ");
+    }
+    private final Runnable holdAccent = this::openAccents;
+    private int searchZone, keyIndex, chooseIndex, searchGen;
+    private static final int SZ_KEYS = 0, SZ_CARDS = 1, SZ_CHOOSE = 2, SZ_BAR = 3;
+    /** The bar's buttons at its right end: the microphone (where the TV can take voice input) and close. */
+    private static final int BAR_MIC = 0, BAR_CLOSE = 1;
+    private int barIndex = BAR_CLOSE;
+    private Boolean canListen;   // the TV has a voice input (Google's): read once
+    static final int VOICE = 41;
+    private final StringBuilder query = new StringBuilder();
+    private static final int MAX_QUERY = 60;   // the longest titles, and still inside the bar
+    private final Spring searchShow = new Spring(0.34f, 0.9f, 0);
+    private List<Recs.Pick> found = new ArrayList<>();
+    private List<String[]> lineApps;   // drawCardLine: the apps to stack after the first (search's cards)
+    private Paint lKey, lKeyOn, lKeySmall, lBar, lBarHint, lChoice, lChoiceNo, lChoiceSub, lPill, lNote, lNoteSub;
+    private final android.graphics.Path keyPath = new android.graphics.Path();
+    private static final java.util.concurrent.ExecutorService SEARCH = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final java.util.concurrent.ExecutorService SCORES = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final String SPACE = " ", DIGITS = "123", LETTERS = "abc", SYMBOLS = "#+=", ERASE = "⌫";
+    private static final String[] KEYS_ABC = "a b c d e f g h i j k l m n o p q r s t u v w x y z".split(" ");
+    private static final String[] KEYS_123 = "1 2 3 4 5 6 7 8 9 0".split(" ");
+    private static final String[] KEYS_SYM = "& ' - : ! ? . , ( ) / +".split(" ");
+    private final Runnable searchNow = this::runSearch;
+
+    /** This mode's keys, then space, the keys to the other two modes, and erase. */
+    private String[] searchKeys() {
+        String[] base = keyMode == KM_NUMBERS ? KEYS_123 : keyMode == KM_SYMBOLS ? KEYS_SYM : KEYS_ABC;
+        String[] out = java.util.Arrays.copyOf(base, base.length + 4);
+        out[base.length] = SPACE;
+        out[base.length + 1] = keyMode == KM_LETTERS ? DIGITS : LETTERS;
+        out[base.length + 2] = keyMode == KM_SYMBOLS ? DIGITS : SYMBOLS;
+        out[base.length + 3] = ERASE;
+        return out;
+    }
+
+    /** To another keyboard mode, the focus staying where it was (on the key that brings it back, for a mode key). */
+    private void keyMode(int mode) {
+        keyMode = mode;
+        keyIndex = Math.min(keyIndex, searchKeys().length - 1);
+        accentOpen = false;
+        heroDirty = true;
+    }
+
+    /** OK held on a letter that has accented forms: they open above it. */
+    private void openAccents() {
+        accentHeld = true;
+        String key = keyIndex < searchKeys().length ? searchKeys()[keyIndex] : "";
+        if (!ACCENTS.containsKey(key)) {
+            accentHeld = false;   // nothing to offer: the release types it as usual
+            return;
+        }
+        accentOpen = true;
+        accentIndex = 0;
+        heroDirty = true;
+        click.move();
+        wake();
+    }
+
+    private void openSearch() {
+        searchOpen = true;
+        searchShow.target = 1;
+        searchZone = SZ_KEYS;
+        zone = Z_TOP;   // the Search button keeps the focus, under the bar
+        cards = found;
+        cardIndex = 0;
+        heroDirty = statusDirty = true;
+        retarget(false);
+        spoken.readAgain();
+        wake();
+    }
+
+    private void closeSearch(boolean animated) {
+        if (!searchOpen) return;
+        stopHearing();
+        if (recognizer != null) {
+            recognizer.destroy();
+            recognizer = null;
+        }
+        searchOpen = false;
+        searching = false;
+        searchGen++;
+        handler.removeCallbacks(searchNow);
+        searchShow.target = 0;
+        if (!animated) searchShow.snap(0);
+        // The next opening starts over: nothing typed, no results, the letters from the start.
+        query.setLength(0);
+        found = new ArrayList<>();
+        searchNote = searchNoteSub = null;
+        keyMode = KM_LETTERS;
+        accentOpen = false;
+        handler.removeCallbacks(holdAccent);
+        keyIndex = 0;
+        chooseIndex = 0;
+        barIndex = BAR_CLOSE;
+        searchZone = SZ_KEYS;
+        zone = Z_TOP;
+        cardIndex = 0;
+        cards = new ArrayList<>();
+        updateCards();   // the tab's own cards again
+        heroDirty = statusDirty = true;
+        retarget(!animated);
+        wake();
+    }
+
+    /** The remote (and a keyboard's letters) while search is open; false: not search's (the volume, Home…). */
+    private boolean searchKey(KeyEvent e) {
+        int code = e.getKeyCode();
+        boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        if (hearing) {   // listening: OK ends it (and searches), Back cancels it; the arrows wait
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (!down && !e.isCanceled()) {
+                    stopHearing();
+                    click.move();
+                }
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                if (down && e.getRepeatCount() == 0) recognizer.stopListening();
+                return true;
+            }
+            if (code >= KeyEvent.KEYCODE_DPAD_UP && code <= KeyEvent.KEYCODE_DPAD_RIGHT) return true;
+            stopHearing();   // typing instead
+        }
+        switch (code) {
+            case KeyEvent.KEYCODE_DPAD_LEFT: if (down) searchMove(-1, 0); return true;
+            case KeyEvent.KEYCODE_DPAD_RIGHT: if (down) searchMove(1, 0); return true;
+            case KeyEvent.KEYCODE_DPAD_UP: if (down) searchMove(0, -1); return true;
+            case KeyEvent.KEYCODE_DPAD_DOWN: if (down) searchMove(0, 1); return true;
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+            case KeyEvent.KEYCODE_ENTER:
+            case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                if (searchZone == SZ_KEYS && accentOpen) {
+                    if (down && e.getRepeatCount() == 0) {
+                        type(ACCENTS.get(searchKeys()[keyIndex]).charAt(accentIndex));
+                        accentOpen = false;
+                        heroDirty = true;
+                        click.move();
+                    }
+                } else if (searchZone == SZ_KEYS) {   // a letter on the release: held, it shows its accents instead
+                    if (down) {
+                        if (e.getRepeatCount() == 0 && !e.isLongPress()) {
+                            accentHeld = false;
+                            handler.postDelayed(holdAccent, 450);
+                        } else if (!accentHeld) {   // the remote says it's held (or repeats it): no need to wait
+                            handler.removeCallbacks(holdAccent);
+                            openAccents();
+                        }
+                    } else {
+                        handler.removeCallbacks(holdAccent);
+                        if (!accentHeld) searchOk();
+                        accentHeld = false;
+                    }
+                } else if (down && e.getRepeatCount() == 0) {
+                    searchOk();
+                }
+                return true;
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+            case KeyEvent.KEYCODE_MEDIA_PLAY:
+            case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                if (down && e.getRepeatCount() == 0) {   // as on Apple TV: letters, numbers, symbols, round again
+                    if (searchZone != SZ_KEYS) toKeys();
+                    keyMode((keyMode + 1) % 3);
+                    click.move();
+                    wake();
+                }
+                return true;
+            case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_ESCAPE:
+                if (!down && !e.isCanceled()) searchBack();
+                return true;
+            case KeyEvent.KEYCODE_DEL:
+                if (down) erase();
+                return true;
+            default:
+                int ch = e.getUnicodeChar();
+                if (ch >= 32 && (Character.isLetterOrDigit(ch) || " &'-:!?.,()/+".indexOf(ch) >= 0)) {   // a keyboard, or the remote's digits
+                    if (down) {
+                        if (searchZone != SZ_KEYS) toKeys();
+                        type((char) Character.toLowerCase(ch));
+                    }
+                    return true;
+                }
+                return false;
+        }
+    }
+
+    private void toKeys() {
+        searchZone = SZ_KEYS;
+        zone = Z_TOP;
+    }
+
+    private void searchMove(int dx, int dy) {
+        if (accentOpen) {
+            int n = ACCENTS.get(searchKeys()[keyIndex]).length();
+            if (dx != 0) {
+                int next = Math.max(0, Math.min(n - 1, accentIndex + dx));
+                if (next == accentIndex) return;
+                accentIndex = next;
+            } else {
+                accentOpen = false;   // up or down leaves them
+            }
+            heroDirty = true;
+            click.move();
+            return;
+        }
+        switch (searchZone) {
+            case SZ_KEYS:
+                if (dx != 0) {
+                    int next = Math.max(0, Math.min(searchKeys().length - 1, keyIndex + dx));
+                    if (next == keyIndex) return;
+                    keyIndex = next;
+                } else if (dy > 0 && !found.isEmpty()) {
+                    searchZone = SZ_CARDS;
+                    zone = Z_CARDS;
+                    score();
+                } else if (dy < 0) {
+                    searchZone = SZ_BAR;
+                    if (barIndex == BAR_MIC && !listens()) barIndex = BAR_CLOSE;
+                } else {
+                    return;
+                }
+                break;
+            case SZ_BAR:
+                if (dx != 0) {
+                    int next = Math.max(listens() ? BAR_MIC : BAR_CLOSE, Math.min(BAR_CLOSE, barIndex + dx));
+                    if (next == barIndex) return;
+                    barIndex = next;
+                } else if (dy > 0) {
+                    toKeys();
+                } else {
+                    return;
+                }
+                break;
+            case SZ_CARDS:
+                if (dx != 0) {
+                    int next = Math.max(0, Math.min(cards.size() - 1, cardIndex + dx));
+                    if (next == cardIndex) return;
+                    cardIndex = next;
+                    score();
+                } else if (dy < 0) {
+                    toKeys();
+                } else {
+                    return;
+                }
+                break;
+            default:   // the choice inside the card
+                Recs.Pick p = cardIndex < cards.size() ? cards.get(cardIndex) : null;
+                int n = p == null || p.apps == null ? 0 : p.apps.size();
+                if (dx != 0 && n > 0) {
+                    int next = Math.max(0, Math.min(n - 1, chooseIndex + dx));
+                    if (next == chooseIndex) return;
+                    chooseIndex = next;
+                } else if (dy < 0) {
+                    searchZone = SZ_CARDS;
+                } else {
+                    return;
+                }
+        }
+        heroDirty = statusDirty = true;
+        retarget(false);
+        click.move();
+    }
+
+    private void searchOk() {
+        if (searchZone == SZ_BAR) {
+            if (barIndex == BAR_CLOSE) {
+                closeSearch(true);
+                click.move();
+            } else {
+                listen();
+            }
+            return;
+        }
+        if (searchZone == SZ_KEYS) {
+            String key = searchKeys()[keyIndex];
+            if (key.equals(ERASE)) {
+                erase();
+            } else if (key.equals(DIGITS) || key.equals(LETTERS) || key.equals(SYMBOLS)) {
+                keyMode(key.equals(DIGITS) ? KM_NUMBERS : key.equals(SYMBOLS) ? KM_SYMBOLS : KM_LETTERS);
+            } else {
+                type(key.charAt(0));
+            }
+            click.move();
+            return;
+        }
+        Recs.Pick p = cardIndex < cards.size() ? cards.get(cardIndex) : null;
+        if (p == null) return;
+        if (searchZone == SZ_CARDS) {   // the choice opens inside the card
+            searchZone = SZ_CHOOSE;
+            chooseIndex = 0;
+            heroDirty = true;
+            click.move();
+            return;
+        }
+        if (p.notOn || p.apps == null || chooseIndex >= p.apps.size()) return;
+        click.open();
+        final String[] app = p.apps.get(chooseIndex);
+        final RectF r = new RectF(cardRects[cardIndex]);
+        SEARCH.execute(() -> {   // its own page in that app when Watchmode knows it, else the app's home
+            String link = recs.searchLink(p, app[0], app[1]);
+            post(() -> HomeApps.open(activity, HomeApps.app(app[1], app[2], link), this,
+                    Math.round(r.left), Math.round(r.top), Math.round(r.width()), Math.round(r.height())));
+        });
+    }
+
+    private void searchBack() {
+        if (accentOpen) {
+            accentOpen = false;
+            heroDirty = true;
+            click.move();
+            return;
+        }
+        if (searchZone == SZ_BAR) toKeys();
+        else if (searchZone == SZ_CHOOSE) searchZone = SZ_CARDS;
+        else if (searchZone == SZ_CARDS) toKeys();
+        else {
+            closeSearch(true);
+            click.move();
+            return;
+        }
+        heroDirty = statusDirty = true;
+        retarget(false);
+        click.move();
+    }
+
+    /** The TV can take voice input (Google's voice search on Android TV and Google TV). */
+    private boolean listens() {
+        if (canListen == null) {
+            canListen = !getContext().getPackageManager().queryIntentActivities(
+                    new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0).isEmpty();
+        }
+        return canListen;
+    }
+
+    /**
+     * The microphone: the bar itself listens, through the TV's speech recognition service (Google's, the one the
+     * remote's mic uses), with what it hears written into the bar as it comes and searched when you stop. Android asks
+     * once to allow the microphone; refused, or without that service, the TV's own voice screen does it instead.
+     */
+    private void listen() {
+        if (hearing) {   // OK on the microphone again: that's all, search what it heard
+            recognizer.stopListening();
+            return;
+        }
+        Context ctx = getContext();
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(ctx)) {
+            listenWithTv();
+        } else if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            hear();
+        } else {
+            activity.requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, VOICE);
+        }
+    }
+
+    /** Android's answer to the microphone permission (HomeActivity). */
+    void onMicAllowed(boolean allowed) {
+        if (!searchOpen) return;
+        if (allowed) hear();
+        else listenWithTv();
+    }
+
+    private android.speech.SpeechRecognizer recognizer;
+    private boolean hearing;             // the bar is listening
+    private float hearLevel, hearShown;  // the voice's loudness (0 to 1), and as the microphone's ring shows it
+    private String beforeVoice = "";     // what was typed before: back when nothing was heard
+
+    private void hear() {
+        if (recognizer == null) {
+            recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(getContext());
+            recognizer.setRecognitionListener(voiceListener);
+        }
+        Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_CALLING_PACKAGE, getContext().getPackageName());
+        beforeVoice = query.toString();
+        handler.removeCallbacks(searchNow);
+        hearing = true;
+        hearLevel = hearShown = 0;
+        searchZone = SZ_BAR;
+        barIndex = BAR_MIC;
+        try {
+            recognizer.startListening(i);
+        } catch (RuntimeException e) {
+            AppLog.w("voice: " + e.getMessage());
+            hearing = false;
+            listenWithTv();
+        }
+        click.open();
+        heroDirty = true;
+        wake();
+    }
+
+    /** Back while listening, or search closing: stop, and leave what was typed before. */
+    private void stopHearing() {
+        if (!hearing) return;
+        hearing = false;
+        if (recognizer != null) recognizer.cancel();
+        setQuery(beforeVoice);
+        heroDirty = true;
+    }
+
+    private void setQuery(String text) {
+        String t = text.toLowerCase(Ui.locale());
+        query.setLength(0);
+        query.append(t, 0, Math.min(MAX_QUERY, t.length()));
+    }
+
+    private static String heard(android.os.Bundle b) {
+        java.util.ArrayList<String> list = b == null ? null : b.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION);
+        return list == null || list.isEmpty() || list.get(0) == null ? null : list.get(0).trim();
+    }
+
+    private final android.speech.RecognitionListener voiceListener = new android.speech.RecognitionListener() {
+        @Override public void onReadyForSpeech(android.os.Bundle params) {}
+        @Override public void onBeginningOfSpeech() {}
+        @Override public void onRmsChanged(float db) {
+            hearLevel = Ui.clamp((db + 2) / 12f);
+        }
+        @Override public void onBufferReceived(byte[] buffer) {}
+        @Override public void onEndOfSpeech() {
+            hearLevel = 0;
+        }
+        @Override public void onPartialResults(android.os.Bundle b) {
+            String s = heard(b);
+            if (!hearing || s == null || s.isEmpty()) return;
+            setQuery(s);   // written as it's heard; searched once it's all heard
+            heroDirty = true;
+        }
+        @Override public void onResults(android.os.Bundle b) {
+            if (!hearing) return;
+            hearing = false;
+            String s = heard(b);
+            if (s != null && !s.isEmpty()) setQuery(s);
+            done();
+        }
+        @Override public void onError(int error) {
+            if (!hearing) return;
+            hearing = false;
+            AppLog.w("voice error " + error);
+            if (error == android.speech.SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                setQuery(beforeVoice);
+                listenWithTv();
+            }
+            done();   // what it heard so far, if anything
+        }
+        @Override public void onEvent(int type, android.os.Bundle params) {}
+
+        private void done() {
+            toKeys();
+            if (!query.toString().equals(beforeVoice)) runSearch();
+            heroDirty = statusDirty = true;
+            retarget(false);
+            wake();
+        }
+    };
+
+    /** The TV's own voice screen (Google's), for a result: where the bar can't listen itself. */
+    private void listenWithTv() {
+        Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, Ui.tr("Search movies and shows"))
+                .putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        try {
+            activity.startActivityForResult(i, VOICE);
+            click.open();
+        } catch (RuntimeException e) {
+            AppLog.w("voice: " + e.getMessage());
+            canListen = false;
+            barIndex = BAR_CLOSE;
+            heroDirty = true;
+        }
+    }
+
+    /** What the voice input heard (null: nothing, or cancelled): it replaces what was typed. */
+    void onVoice(Intent data) {
+        java.util.ArrayList<String> heard = data == null ? null : data.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS);
+        if (!searchOpen || heard == null || heard.isEmpty() || heard.get(0).trim().isEmpty()) return;
+        setQuery(heard.get(0).trim());
+        toKeys();
+        handler.removeCallbacks(searchNow);
+        runSearch();
+        heroDirty = true;
+        wake();
+    }
+
+    private void type(char ch) {
+        if (query.length() >= MAX_QUERY || (ch == ' ' && (query.length() == 0 || query.charAt(query.length() - 1) == ' '))) return;
+        query.append(ch);
+        searchSoon();
+    }
+
+    private void erase() {
+        if (query.length() == 0) return;
+        query.setLength(query.length() - 1);
+        searchSoon();
+    }
+
+    /** A moment after the last letter: each letter doesn't start its own search. */
+    private void searchSoon() {
+        heroDirty = true;   // the bar's text
+        handler.removeCallbacks(searchNow);
+        handler.postDelayed(searchNow, 350);
+        wake();
+    }
+
+    private void runSearch() {
+        final String q = query.toString().trim();
+        final int gen = ++searchGen;
+        if (q.isEmpty()) {
+            searching = false;
+            searchNote = searchNoteSub = null;
+            found = new ArrayList<>();
+            cards = found;
+            cardIndex = 0;
+            heroDirty = statusDirty = true;
+            retarget(false);
+            return;
+        }
+        searching = true;
+        wake();
+        SEARCH.execute(() -> {
+            List<Recs.Pick> list = null;
+            try {
+                list = recs.search(q);
+            } catch (Exception e) {
+                AppLog.w("search: " + e.getMessage());
+            }
+            final List<Recs.Pick> got = list;
+            post(() -> {
+                if (gen != searchGen || !searchOpen) return;
+                searching = false;
+                // A failed search clears the last one's cards too: they were for other letters.
+                found = got != null ? got : new ArrayList<>();
+                cards = found;
+                cardIndex = 0;
+                if (found.isEmpty()) {
+                    toKeys();
+                    searchNote = got != null ? Ui.trf("No results for “{query}”", "query", q) : Ui.tr("Couldn't search");
+                    searchNoteSub = got != null ? Ui.tr("Check the spelling, or try fewer letters") : Ui.tr("Check the TV's internet connection");
+                } else {
+                    searchNote = searchNoteSub = null;
+                    if (searchZone != SZ_KEYS) searchZone = SZ_CARDS;
+                    score();
+                }
+                heroDirty = statusDirty = true;
+                retarget(false);
+                wake();
+            });
+        });
+    }
+
+    /** The opened card's audience score, looked up once it's the one in front. */
+    private void score() {
+        if (cardIndex >= cards.size()) return;
+        final Recs.Pick p = cards.get(cardIndex);
+        if (p.scoreAsked || p.notOn) return;
+        SCORES.execute(() -> {
+            recs.searchScore(p);
+            post(() -> {
+                heroDirty = true;
+                wake();
+            });
+        });
+    }
+
+    private void searchPaints() {
+        if (lKey != null && lKey.getTextSize() == 34 * k) return;
+        lKey = Ui.text(Ui.semibold, 34 * k, 0xFFFFFFFF);
+        lKey.setTextAlign(Paint.Align.CENTER);
+        lKeyOn = new Paint(lKey);
+        lKeyOn.setColor(0xFF16181D);
+        lKeySmall = Ui.text(Ui.semibold, 25 * k, 0xFFFFFFFF);
+        lKeySmall.setTextAlign(Paint.Align.CENTER);
+        lBar = Ui.text(Ui.medium, 36 * k, 0xFF16181D);
+        lBarHint = Ui.text(Ui.medium, 34 * k, 0x8016181D);
+        lChoice = Ui.text(Ui.semibold, 27 * k, 0xFF16181D);
+        lChoiceNo = Ui.text(Ui.semibold, 32 * k, 0xFFB4361E);
+        lChoiceSub = Ui.text(Ui.medium, 24 * k, 0x9916181D);
+        lPill = Ui.text(Ui.semibold, 27 * k, 0xFF16181D);
+        lNote = Ui.text(Ui.semibold, 40 * k, 0xFFFFFFFF);
+        lNoteSub = Ui.text(Ui.medium, 28 * k, 0xFFFFFFFF);
+        lNote.setTextAlign(Paint.Align.CENTER);
+        lNoteSub.setTextAlign(Paint.Align.CENTER);
+    }
+
+    /** Where the cards would be, when a search found none: what it looked for, or that it couldn't. */
+    private void drawSearchNote(Canvas c) {
+        if (searchNote == null || searching || !found.isEmpty()) return;
+        searchPaints();
+        // Centred across the screen, in the middle of where the cards would be.
+        float x = getWidth() / 2f, y = (L_CARDS_TOP + L_CARD_H / 2) * k;
+        lNote.setColor(tone(L_INK, 0xFFFFFFFF));
+        c.drawText(searchNote, x, y - 6 * k, lNote);
+        lNoteSub.setColor(Ui.alpha(tone(L_INK, 0xFFFFFFFF), 0.6f));
+        c.drawText(searchNoteSub, x, y + 44 * k, lNoteSub);
+    }
+
+    /** The bar, grown out of the Search button (`b`) toward the left edge as searchShow goes from 0 to 1. */
+    private void drawSearchBar(Canvas c, RectF b) {
+        searchPaints();
+        float t = Ui.clamp(searchShow.value), h = b.height() + (76 * k - b.height()) * t, cy = b.centerY();
+        float left = b.left + (MARGIN * k - b.left) * t;
+        cell.set(left, cy - h / 2, b.right, cy + h / 2);
+        tmp.set(cell);
+        tmp.offset(0, 10 * k);
+        shadow.setColor(Ui.alpha(0xFF000000, 0.12f + 0.2f * t));
+        shadows.draw(c, tmp, h / 2, SHADOW_BLUR * k, shadow);
+        fill.setShader(null);
+        fill.setColor(0xF7F6F7F9);
+        c.drawRoundRect(cell, h / 2, h / 2, fill);
+        Symbols.draw(getContext(), c, "search", cell.left + h / 2, cy, 30 * k, 0xFF16181D);
+        if (t < 0.6f) return;
+        int a = Math.round(255 * Ui.clamp((t - 0.6f) / 0.4f));
+        float tx = cell.left + h / 2 + 36 * k, base = cy + Ui.halfCap(lBar);
+        if (query.length() == 0) {
+            lBarHint.setAlpha(Math.round(0x80 * a / 255f));
+            c.drawText(hearing ? Ui.tr("Listening…") : Ui.tr("Search movies and shows"), tx + 18 * k, base, lBarHint);   // after the caret, not under it
+        } else {
+            lBar.setAlpha(a);
+            String q = query.toString();
+            c.drawText(q, tx, base, lBar);
+            tx += lBar.measureText(q);
+        }
+        if (searchZone == SZ_KEYS) {   // the caret, where the next letter goes
+            fill.setColor(Ui.alpha(0xFF16181D, a / 255f));
+            c.drawRect(tx + 4 * k, cy - 20 * k, tx + 7 * k, cy + 20 * k, fill);
+        }
+        // Its buttons at the right end: the microphone (where the TV has voice input) and close.
+        float bs = 56 * k, gap = 10 * k, bx = cell.right - (h - bs) / 2 - bs;
+        for (int j = BAR_CLOSE; j >= BAR_MIC; j--) {
+            if (j == BAR_MIC && !listens()) continue;
+            boolean on = searchZone == SZ_BAR && barIndex == j, live = hearing && j == BAR_MIC;
+            float ccx = bx + bs / 2;
+            if (live) {   // listening: red, with a ring that swells with the voice
+                fill.setShader(null);
+                fill.setColor(Ui.alpha(0xFFE5402F, (0.18f + 0.22f * hearShown) * a / 255f));
+                c.drawCircle(ccx, cy, bs / 2 + (5 + 9 * hearShown) * k, fill);
+                fill.setColor(Ui.alpha(0xFFE5402F, a / 255f));
+                c.drawCircle(ccx, cy, bs / 2, fill);
+                on = true;   // the white icon
+            } else if (on) {
+                fill.setColor(Ui.alpha(0xFF16181D, a / 255f));
+                c.drawCircle(ccx, cy, bs / 2, fill);
+            }
+            Paint line = cardSpinner;
+            line.setStrokeWidth(3.5f * k);
+            line.setColor(Ui.alpha(on ? 0xFFFFFFFF : 0xFF4A4D55, a / 255f));
+            keyPath.reset();
+            if (j == BAR_CLOSE) {
+                float d = 10 * k;
+                keyPath.moveTo(ccx - d, cy - d);
+                keyPath.lineTo(ccx + d, cy + d);
+                keyPath.moveTo(ccx + d, cy - d);
+                keyPath.lineTo(ccx - d, cy + d);
+            } else {   // a microphone: the capsule, the cradle under it, the stand
+                tmp.set(ccx - 6 * k, cy - 15 * k, ccx + 6 * k, cy + 5 * k);
+                keyPath.addRoundRect(tmp, 6 * k, 6 * k, android.graphics.Path.Direction.CW);
+                tmp.set(ccx - 11 * k, cy - 7 * k, ccx + 11 * k, cy + 11 * k);
+                keyPath.arcTo(tmp, 0, 180, true);
+                keyPath.moveTo(ccx, cy + 11 * k);
+                keyPath.lineTo(ccx, cy + 16 * k);
+            }
+            c.drawPath(keyPath, line);
+            bx -= bs + gap;
+        }
+        if (searching) {   // looking: a small ring turning, just left of the buttons
+            float sr = 14 * k, turn = (SystemClock.uptimeMillis() % 1000) / 1000f * 360, sx = bx + bs - sr - 6 * k;
+            cardSpinner.setStrokeWidth(3.5f * k);
+            cardSpinner.setColor(0x9916181D);
+            tmp.set(sx - sr, cy - sr, sx + sr, cy + sr);
+            c.drawArc(tmp, turn, 270, false, cardSpinner);
+        }
+    }
+
+    /** The letters, in one line across the screen where the tabs are: no panel, only the focused key on white. */
+    private void drawSearchKeys(Canvas c) {
+        searchPaints();
+        String[] keys = searchKeys();
+        float x0 = MARGIN * k, w = (CONTENT_R - MARGIN) * k / keys.length, top = L_TABBAR_TOP * k, h = L_TABBAR_H * k;
+        int ink = tone(L_INK, 0xFFFFFFFF);
+        if (keys.length > 30) w = (CONTENT_R - MARGIN) * k / keys.length;
+        for (int i = 0; i < keys.length; i++) {
+            float l = x0 + i * w, cx = l + w / 2, cy = top + h / 2;
+            boolean on = i == keyIndex && searchZone == SZ_KEYS;
+            if (on) {
+                cell.set(l + 3 * k, top, l + w - 3 * k, top + h);
+                tmp.set(cell);
+                tmp.offset(0, 6 * k);
+                shadow.setColor(0x40000000);
+                shadows.draw(c, tmp, 14 * k, SHADOW_BLUR * k, shadow);
+                fill.setShader(null);
+                fill.setColor(0xFFFFFFFF);
+                c.drawRoundRect(cell, 14 * k, 14 * k, fill);
+            }
+            int color = on ? 0xFF16181D : ink;
+            String key = keys[i];
+            if (key.equals(SPACE) || key.equals(ERASE)) {
+                Paint line = cardSpinner;   // a stroke paint: the space's bracket, the erase key's arrow
+                line.setStrokeWidth(3.5f * k);
+                line.setColor(color);
+                keyPath.reset();
+                if (key.equals(SPACE)) {
+                    keyPath.moveTo(cx - 16 * k, cy - 2 * k);
+                    keyPath.lineTo(cx - 16 * k, cy + 8 * k);
+                    keyPath.lineTo(cx + 16 * k, cy + 8 * k);
+                    keyPath.lineTo(cx + 16 * k, cy - 2 * k);
+                } else {
+                    keyPath.moveTo(cx - 20 * k, cy);
+                    keyPath.lineTo(cx - 9 * k, cy - 12 * k);
+                    keyPath.lineTo(cx + 18 * k, cy - 12 * k);
+                    keyPath.lineTo(cx + 18 * k, cy + 12 * k);
+                    keyPath.lineTo(cx - 9 * k, cy + 12 * k);
+                    keyPath.close();
+                    keyPath.moveTo(cx - 1 * k, cy - 5 * k);
+                    keyPath.lineTo(cx + 9 * k, cy + 5 * k);
+                    keyPath.moveTo(cx + 9 * k, cy - 5 * k);
+                    keyPath.lineTo(cx - 1 * k, cy + 5 * k);
+                }
+                c.drawPath(keyPath, line);
+            } else {
+                Paint p = key.length() > 1 ? lKeySmall : on ? lKeyOn : lKey;
+                p.setColor(color);
+                c.drawText(key, cx, cy + Ui.halfCap(p), p);
+            }
+        }
+
+    }
+
+    /** The held letter's accented forms, in a dark capsule just under it: drawn after the cards, over them. */
+    private void drawAccents(Canvas c) {
+        searchPaints();
+        String[] keys = searchKeys();
+        float x0 = MARGIN * k, w = (CONTENT_R - MARGIN) * k / keys.length, top = L_TABBAR_TOP * k, h = L_TABBAR_H * k;
+        if (!accentOpen || keyIndex >= keys.length || !ACCENTS.containsKey(keys[keyIndex])) return;
+        String forms = ACCENTS.get(keys[keyIndex]);
+        float bw = 64 * k, ph = 72 * k, pw = forms.length() * bw + 16 * k, kx = x0 + keyIndex * w + w / 2;
+        float pl = Math.max(MARGIN * k, Math.min(CONTENT_R * k - pw, kx - pw / 2)), pt = top + h + 10 * k;
+        cell.set(pl, pt, pl + pw, pt + ph);
+        tmp.set(cell);
+        tmp.offset(0, 8 * k);
+        shadow.setColor(0x66000000);
+        shadows.draw(c, tmp, ph / 2, SHADOW_BLUR * k, shadow);
+        fill.setShader(null);
+        fill.setColor(0xF01C1E22);
+        c.drawRoundRect(cell, ph / 2, ph / 2, fill);
+        for (int j = 0; j < forms.length(); j++) {
+            float l = pl + 8 * k + j * bw, ccx = l + bw / 2, ccy = pt + ph / 2;
+            boolean on = j == accentIndex;
+            if (on) {
+                cell.set(l + 4 * k, pt + 8 * k, l + bw - 4 * k, pt + ph - 8 * k);
+                fill.setColor(0xFFFFFFFF);
+                c.drawRoundRect(cell, 14 * k, 14 * k, fill);
+            }
+            Paint p = on ? lKeyOn : lKey;
+            p.setColor(on ? 0xFF16181D : 0xFFFFFFFF);
+            String f = String.valueOf(forms.charAt(j));
+            c.drawText(f, ccx, ccy + Ui.halfCap(p), p);
+        }
+    }
+
+    /** Inside the opened card, after OK: "Open in" and its apps (the focused one dark), or where it is instead. */
+    private void drawSearchChoice(Canvas c, Recs.Pick p, float r) {
+        searchPaints();
+        float h = 132 * k, cy = cell.bottom - h / 2;
+        c.save();
+        c.clipRect(cell.left, cell.bottom - h, cell.right, cell.bottom);
+        fill.setShader(null);
+        fill.setColor(0xF5F6F7F9);
+        c.drawRoundRect(cell, r, r, fill);
+        c.restore();
+        float x = cell.left + 40 * k;
+        if (p.notOn || p.apps == null || p.apps.isEmpty()) {
+            c.drawText(Ui.tr("Not on your apps"), x, cy - 6 * k, lChoiceNo);
+            String where = p.rent != null ? Ui.trf("Rent or buy: {stores}", "stores", p.rent) : Recs.upcoming(p) ? Ui.tr("Not streaming anywhere yet") : Ui.tr("Not available to stream");
+            c.drawText(where, x, cy + 32 * k, lChoiceSub);
+            return;
+        }
+        String open = Ui.tr("Open in");
+        c.drawText(open, x, cy + Ui.halfCap(lChoice), lChoice);
+        x += lChoice.measureText(open) + 24 * k;
+        float ph = 76 * k, icon = 46 * k;
+        for (int j = 0; j < p.apps.size(); j++) {
+            String[] app = p.apps.get(j);
+            boolean on = j == chooseIndex;
+            float w = 16 * k + icon + 14 * k + lPill.measureText(app[2]) + 28 * k;
+            if (x + w > cell.right - 24 * k) break;
+            tmp.set(x, cy - ph / 2, x + w, cy + ph / 2);
+            fill.setColor(on ? 0xFF16181D : 0x1416181D);
+            c.drawRoundRect(tmp, ph / 2, ph / 2, fill);
+            Bitmap b = watchIcon(app[1]);
+            if (b != null) {
+                cell2.set(x + 16 * k, cy - icon / 2, x + 16 * k + icon, cy + icon / 2);
+                c.drawBitmap(b, null, cell2, bitmapPaint);
+            }
+            lPill.setColor(on ? 0xFFFFFFFF : 0xFF16181D);
+            c.drawText(app[2], x + 16 * k + icon + 14 * k, cy + Ui.halfCap(lPill), lPill);
+            x += w + 14 * k;
+        }
+    }
+
+    private final RectF cell2 = new RectF();
+
+
     /** "86% · Drama · 1h 52m": the audience score before the details, made once per score and details. */
     private String scoredMeta(String meta, int audience) {
         if (audience < 0) return meta;
@@ -5878,6 +6789,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             tmp.set(left, cy - size / 2, left + size, cy + size / 2);
             c.drawBitmap(icon, null, tmp, bitmapPaint);
             x = left + size + 14 * k;
+            // Search: the other apps that have it, each overlapping the one before, a ring of the background between.
+            for (int j = 1; lineApps != null && j < lineApps.size(); j++) {
+                Bitmap more = watchIcon(lineApps.get(j)[1]);
+                if (more == null) continue;
+                float l = left + j * size * 0.7f, ring = 3 * k;
+                tmp.set(l - ring, cy - size / 2 - ring, l + size + ring, cy + size / 2 + ring);
+                fill.setShader(null);
+                fill.setColor(tone(0xFFEDEDF0, 0xFF1C1E22));
+                c.drawRoundRect(tmp, size * 0.24f + ring, size * 0.24f + ring, fill);
+                tmp.set(l, cy - size / 2, l + size, cy + size / 2);
+                c.drawBitmap(more, null, tmp, bitmapPaint);
+                x = l + size + 14 * k;
+            }
         }
         int a = lCardMeta.getAlpha();
         // A narrow card's line is a little smaller, so its title fits beside the episode (as the opened one grows). The
@@ -5980,6 +6904,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             }
             HomeApps.Item it = lightButtons.get(i);
             RectF r = topRects[TABS + i];
+            if (it.kind == HomeApps.SEARCH && searchShow.value > 0.001f) continue;   // the bar takes its place (drawLightTop)
             float lift = reorderTop && i == liftIndex ? Math.max(0, moveLift.value) : 0;
             float dx = topSlide[i].value;
             boolean transform = dx != 0 || lift > 0.001f;

@@ -59,7 +59,38 @@ final class RtPopular {
         return out;
     }
 
-    private static String read(String address) throws IOException {
+    private static final Pattern ROW = Pattern.compile("<search-page-media-row(.*?)</search-page-media-row>", Pattern.DOTALL);
+    private static final Pattern ROW_LINK = Pattern.compile("href=\"(https://www\\.rottentomatoes\\.com/(m|tv)/[^\"]+)\"");
+    private static final Pattern ROW_NAME = Pattern.compile("alt=\"([^\"]*)\"");
+    private static final Pattern ROW_YEAR = Pattern.compile("(?:releaseyear|startyear)=\"(\\d{4})\"");
+    private static final Pattern PAGE_AUDIENCE = Pattern.compile("\"audienceScore\":\\{[^}]*\"scorePercent\":\"(\\d+)%\"");
+
+    /**
+     * One title's audience score (%), from Rotten Tomatoes' search and the title's page (the search's own results:
+     * same name and kind, a movie within a year of `year`); -1 when it has none, or none matches. Two requests.
+     */
+    static int audience(String title, int year, boolean show) throws IOException {
+        String page = read("https://www.rottentomatoes.com/search?search=" + java.net.URLEncoder.encode(title, "UTF-8"));
+        String want = key(title), link = null;
+        Matcher row = ROW.matcher(page);
+        while (row.find() && link == null) {
+            String r = row.group(1);
+            Matcher l = ROW_LINK.matcher(r), n = ROW_NAME.matcher(r), y = ROW_YEAR.matcher(r);
+            if (!l.find() || !n.find() || !l.group(2).equals(show ? "tv" : "m")) continue;
+            if (!key(android.text.Html.fromHtml(n.group(1)).toString()).equals(want)) continue;
+            if (!show && year > 0 && y.find() && Math.abs(Integer.parseInt(y.group(1)) - year) > 1) continue;
+            link = l.group(1);
+        }
+        if (link == null) return -1;
+        Matcher a = PAGE_AUDIENCE.matcher(read(link));
+        return a.find() ? Integer.parseInt(a.group(1)) : -1;
+    }
+
+    private static String key(String title) {
+        return title.toLowerCase(java.util.Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    static String read(String address) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(address).openConnection();
         c.setConnectTimeout(15_000);
         c.setReadTimeout(20_000);

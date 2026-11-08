@@ -550,6 +550,11 @@ final class Prefs {
         put("topButtons", sb.toString());
     }
 
+    /** Search was added once to top buttons chosen before it existed (after that, the Top Buttons editor decides). */
+    static boolean searchButtonAdded() { return sp().getBoolean("searchButtonAdded", false); }
+
+    static void setSearchButtonAdded() { put("searchButtonAdded", true); }
+
     // MARK: - Remote buttons
 
     private static String defaultApp(int keyCode) {

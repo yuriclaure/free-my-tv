@@ -122,4 +122,18 @@ public class HomeActivity extends Activity {
         return super.dispatchKeyEvent(event);
     }
 
+
+    /** Search's microphone: what the TV's voice input heard. */
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request == HomeView.VOICE && home != null) home.onVoice(result == RESULT_OK ? data : null);
+    }
+
+    /** Search's microphone: Android's answer when it asked to allow it. */
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == HomeView.VOICE && home != null) {
+            home.onMicAllowed(results.length > 0 && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
+        }
+    }
 }

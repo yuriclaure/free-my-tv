@@ -59,6 +59,13 @@ final class Recs {
         boolean detailed;
         boolean horror;         // a horror title (its genre, or for a show its keywords): left out of the picks
         int audience = -1;      // Rotten Tomatoes' audience score (%) from RtPopular, or -1
+        // Search's results only:
+        List<String[]> apps;    // every app on the TV that has it, as {service key, package, name}: the first is app/pkg
+        String rent;            // none of them has it: where it can be rented or bought ("Amazon Video, Apple TV Store")
+        boolean notOn;          // none of the TV's apps has it
+        int year;               // IMDb's year: the score's lookup, and remakes told apart
+        int rank;               // IMDb's popularity rank (its MovieMeter: 1 is the most looked at), or MAX_VALUE
+        volatile boolean scoreAsked;   // its audience score was looked up (audience stays -1 when there's none)
         java.io.File photo;     // one of your own photos (Photos): no title, no caption
     }
 
@@ -989,6 +996,141 @@ final class Recs {
     /** A title to compare by: lower case, letters and digits only ("Ali G: Who Iz I?" → "aligwhoizi"). */
     private static String titleKey(String title) {
         return title == null ? "" : title.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    // MARK: - Search (the home screen's Search button)
+
+    private static final int SEARCH_MAX = 10;
+    private final Map<String, Pick> searched = new HashMap<>();   // by IMDb id, once looked up (null: TMDB doesn't know it)
+
+    /**
+     * IMDb's titles for `query`, as its own search box suggests them, each found on TMDB (its pictures, details, and
+     * every app on the TV that has it in REGION), the most popular first (IMDb's own popularity rank), so an obscure
+     * namesake doesn't come before the title everyone means; those on none of the apps come after, with where to rent
+     * or buy them.
+     * Network: run it off the UI thread. A title is looked up once, so typing on reuses what came before.
+     */
+    List<Pick> search(String query) throws Exception {
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        List<Pick> on = new ArrayList<>(), off = new ArrayList<>();
+        if (q.isEmpty() || !hasKey(context)) return on;
+        JSONArray d = new JSONObject(RtPopular.read("https://v3.sg.media-imdb.com/suggestion/x/"
+                + URLEncoder.encode(q, "UTF-8").replace("+", "%20") + ".json")).optJSONArray("d");
+        for (int i = 0; d != null && i < d.length() && on.size() + off.size() < SEARCH_MAX; i++) {
+            JSONObject o = d.getJSONObject(i);
+            String tt = o.optString("id"), type = o.optString("qid");
+            if (!tt.startsWith("tt") || !(type.equals("movie") || type.equals("tvSeries") || type.equals("tvMiniSeries") || type.equals("tvMovie"))) continue;
+            Pick p;
+            synchronized (searched) {
+                p = searched.containsKey(tt) ? searched.get(tt) : null;
+            }
+            if (p == null && !searchedKnown(tt)) {
+                try {
+                    p = searchFind(tt, o.optInt("y"));
+                } catch (Exception e) {
+                    AppLog.w("search " + tt + ": " + e.getMessage());
+                    continue;   // tried again with the next letter
+                }
+                synchronized (searched) {
+                    if (searched.size() > 200) searched.clear();
+                    searched.put(tt, p);
+                }
+            }
+            if (p != null) {
+                p.rank = o.has("rank") ? o.optInt("rank", Integer.MAX_VALUE) : Integer.MAX_VALUE;
+                (p.notOn ? off : on).add(p);
+            }
+        }
+        java.util.Comparator<Pick> popular = (a, b) -> Integer.compare(a.rank, b.rank);
+        java.util.Collections.sort(on, popular);
+        java.util.Collections.sort(off, popular);
+        on.addAll(off);
+        return on;
+    }
+
+    private boolean searchedKnown(String tt) {
+        synchronized (searched) {
+            return searched.containsKey(tt);
+        }
+    }
+
+    /** One of IMDb's titles on TMDB, as a card; null when TMDB doesn't know it. */
+    private Pick searchFind(String tt, int year) throws Exception {
+        JSONObject f = get("/find/" + tt + "?external_source=imdb_id&language=" + lang());
+        JSONArray movies = f.optJSONArray("movie_results"), shows = f.optJSONArray("tv_results");
+        boolean movie = movies != null && movies.length() > 0;
+        if (!movie && (shows == null || shows.length() == 0)) return null;
+        JSONObject o = (movie ? movies : shows).getJSONObject(0);
+        Pick p = new Pick();
+        p.id = o.optInt("id");
+        p.kind = movie ? "movie" : "tv";
+        p.title = o.optString(movie ? "title" : "name");
+        p.year = year;
+        String backdrop = o.optString("backdrop_path", "");
+        p.backdrop = backdrop.isEmpty() || "null".equals(backdrop) ? null : backdrop;
+        p.poster = o.isNull("poster_path") ? "" : o.optString("poster_path");
+        fetchDetails(p);   // its title in the TV's language, the best backdrop, the logo, genre and length, horror
+        // Every app on the TV that has it, not only the first; and where else it is, for one none of them has.
+        JSONObject results = get("/" + p.kind + "/" + p.id + "/watch/providers").optJSONObject("results");
+        JSONObject here = results == null ? null : results.optJSONObject(REGION);
+        p.apps = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String type : new String[] {"flatrate", "ads", "free"}) {
+            JSONArray list = here == null ? null : here.optJSONArray(type);
+            for (int i = 0; list != null && i < list.length(); i++) {
+                String[] svc = service(list.getJSONObject(i).optString("provider_name"), list.getJSONObject(i).optInt("provider_id"));
+                if (svc != null && installed(svc[2]) && seen.add(svc[2])) p.apps.add(new String[] {svc[1], svc[2], name(svc[1])});
+            }
+        }
+        java.util.LinkedHashSet<String> stores = new java.util.LinkedHashSet<>();
+        for (String type : new String[] {"rent", "buy"}) {
+            JSONArray list = here == null ? null : here.optJSONArray(type);
+            for (int i = 0; list != null && i < list.length() && stores.size() < 3; i++) stores.add(list.getJSONObject(i).optString("provider_name"));
+        }
+        p.rent = stores.isEmpty() ? null : android.text.TextUtils.join(", ", stores);
+        String meta = p.meta;
+        if (p.appLabel != null && meta.endsWith(" · " + p.appLabel)) meta = meta.substring(0, meta.length() - p.appLabel.length() - 3);
+        if (p.apps.isEmpty()) {
+            p.notOn = true;
+            p.app = p.pkg = p.appLabel = p.servicePkg = null;
+            p.link = null;
+            p.meta = (year > 0 ? year + " · " : "") + (p.rent != null ? Ui.tr("Rent or buy") : upcoming(p) ? Ui.tr("Not streaming yet") : Ui.tr("Not available to stream"));   // the card says the rest
+        } else {
+            if (p.servicePkg == null) {   // the first app TMDB lists that's on the TV
+                p.app = p.apps.get(0)[0];
+                p.pkg = p.apps.get(0)[1];
+            }
+            p.appLabel = null;   // the line under the card shows the apps' icons, not their names
+            p.meta = (year > 0 ? year + " · " : "") + meta;
+        }
+        return p;
+    }
+
+    /** This year's or later: "not streaming yet" (an older one nowhere to stream simply isn't available). */
+    static boolean upcoming(Pick p) {
+        return p.year >= Calendar.getInstance().get(Calendar.YEAR);
+    }
+
+    /** The audience score of a search result, looked up once (network: off the UI thread). */
+    void searchScore(Pick p) {
+        if (p.scoreAsked) return;
+        p.scoreAsked = true;
+        try {
+            p.audience = RtPopular.audience(p.title, p.year, "tv".equals(p.kind));
+        } catch (Exception e) {
+            AppLog.w("search score: " + e.getMessage());
+        }
+    }
+
+    /** The title's own page in `appKey`'s app (Watchmode, when a key is set), or null: the app's home then. Network. */
+    String searchLink(Pick p, String appKey, String pkg) {
+        Pick one = new Pick();
+        one.id = p.id;
+        one.kind = p.kind;
+        one.app = appKey;
+        one.pkg = pkg;
+        findLink(one);
+        return one.link;
     }
 
     /** The details of the same title in the list before (`known`), with this one's tag; false: not there. */

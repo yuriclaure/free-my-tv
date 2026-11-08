@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- "Continue watching": what you left half-way in your apps, from Android TV's own Watch Next list. -->
     <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
+    <!-- Search's microphone: the bar listens through the TV's speech recognition, only while it shows it is. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The Bluetooth status icon: whether headphones or a speaker are connected. Before Android 12 the permission is
          granted at install; from 12 it is asked for when Status icons is turned on (and only the icon needs it). -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
