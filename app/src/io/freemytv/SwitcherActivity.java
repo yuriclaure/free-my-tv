@@ -54,6 +54,13 @@ public class SwitcherActivity extends Activity {
     /** The list, off the main thread. */
     protected List<App> load(Context c) { return apps(c); }
 
+    /**
+     * Whether the last list and its icons are also kept on disk, for an opening after Android has ended :home: the app
+     * list read cold took ~2.4 s on a 2018 BRAVIA (each app's name loads its resources), and the strip waited for it.
+     * Not for the inputs, whose entries carry the TV's input objects.
+     */
+    protected boolean saved() { return true; }
+
     /** An entry's icon at `size` px, off the main thread. */
     protected Bitmap makeIcon(Context c, App a, int size) { return drawIcon(c, a, size); }
 
@@ -285,6 +292,85 @@ public class SwitcherActivity extends Activity {
         return b;
     }
 
+    // MARK: - The copy on disk
+
+    private static java.io.File savedDir(Context c) {
+        return new java.io.File(c.getCacheDir(), "switcher");
+    }
+
+    /**
+     * The list saved last time (null when there's none, or for another size), with the icons of the first `icons`
+     * entries (savedIcons reads the others): the first screenful shows without waiting for the rest.
+     */
+    private static List<App> readSaved(Context c, int size, int icons) {
+        java.io.File dir = savedDir(c), list = new java.io.File(dir, "apps-" + size + ".txt");
+        if (!list.exists()) return null;
+        List<App> out = new ArrayList<>();
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(list), "UTF-8"))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                String[] f = line.split("\t", 3);
+                if (f.length < 3) continue;
+                App a = new App(f[0], f[2], (int) Long.parseLong(f[1]));
+                if (out.size() < icons) savedIcon(dir, a, size);
+                out.add(a);
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            AppLog.w("switcher saved list: " + e.getMessage());
+            return null;
+        }
+        return out.isEmpty() ? null : out;
+    }
+
+    /** The icons readSaved left out. */
+    private static void savedIcons(Context c, List<App> list, int size) {
+        java.io.File dir = savedDir(c);
+        for (App a : list) if (a.icon == null) savedIcon(dir, a, size);
+    }
+
+    private static void savedIcon(java.io.File dir, App a, int size) {
+        Bitmap b = android.graphics.BitmapFactory.decodeFile(new java.io.File(dir, iconName(a.pkg, size)).getPath());
+        if (b == null) return;
+        synchronized (ICON_CACHE) {
+            ICON_CACHE.put(a.pkg + "@" + size, b);
+        }
+        a.icon = b;
+    }
+
+    /** Saves the list and any icon not saved yet (written to a temporary file, then renamed). */
+    private static void writeSaved(Context c, List<App> list, int size) {
+        java.io.File dir = savedDir(c);
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        try {
+            StringBuilder b = new StringBuilder();
+            for (App a : list) {
+                b.append(a.pkg).append('\t').append(a.color).append('\t').append(a.label.replace('\n', ' ')).append('\n');
+                java.io.File icon = new java.io.File(dir, iconName(a.pkg, size));
+                if (a.icon != null && !icon.exists()) {
+                    java.io.File tmp = new java.io.File(dir, icon.getName() + ".tmp");
+                    try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) {
+                        a.icon.compress(Bitmap.CompressFormat.PNG, 100, o);
+                    }
+                    //noinspection ResultOfMethodCallIgnored
+                    tmp.renameTo(icon);
+                }
+            }
+            java.io.File tmp = new java.io.File(dir, "apps-" + size + ".tmp");
+            try (java.io.FileOutputStream o = new java.io.FileOutputStream(tmp)) {
+                o.write(b.toString().getBytes("UTF-8"));
+            }
+            //noinspection ResultOfMethodCallIgnored
+            tmp.renameTo(new java.io.File(dir, "apps-" + size + ".txt"));
+        } catch (java.io.IOException | RuntimeException e) {
+            AppLog.w("switcher save: " + e.getMessage());
+        }
+    }
+
+    private static String iconName(String pkg, int size) {
+        return pkg.replaceAll("[^A-Za-z0-9._-]", "_") + "@" + size + ".png";
+    }
+
     private static boolean samePackages(List<App> a, List<App> b) {
         if (a.size() != b.size()) return false;
         for (int i = 0; i < a.size(); i++) {
@@ -358,7 +444,19 @@ public class SwitcherActivity extends Activity {
                 setApps(cached);
                 show.target = 1;
             }
+            final boolean disk = cached == null && saved();
             new Thread(() -> {
+                // Opened cold (:home started again): last time's list from the disk first, at once; then read afresh.
+                if (disk) {
+                    final List<App> before = readSaved(app, size, 12);
+                    if (before != null) {
+                        main.post(() -> {
+                            if (apps.isEmpty()) replace(before);
+                        });
+                        savedIcons(app, before, size);
+                        main.post(this::invalidate);
+                    }
+                }
                 final List<App> list = load(app);
                 // The first screenful of icons before the strip slides in, so it never arrives empty; the rest after.
                 int first = Math.min(list.size(), 14);
@@ -370,6 +468,7 @@ public class SwitcherActivity extends Activity {
                 if (list.isEmpty()) main.post(() -> replace(list));
                 main.post(this::invalidate);
                 synchronized (LAST) { LAST.put(SwitcherActivity.this.getClass(), list); }
+                if (saved()) writeSaved(app, list, size);
             }, "switcher").start();
         }
 

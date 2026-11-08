@@ -22,6 +22,8 @@ public class InputSwitcherActivity extends SwitcherActivity {
 
     @Override protected String titleText() { return Ui.tr("Switch inputs"); }
 
+    @Override protected boolean saved() { return false; }   // its entries carry the TV's input objects
+
     @Override protected List<App> load(Context c) {
         List<App> out = new ArrayList<>();
         for (HomeApps.Item it : HomeApps.allInputs(c)) {
