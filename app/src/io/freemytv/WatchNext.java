@@ -9,7 +9,6 @@ import android.net.Uri;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -28,7 +27,8 @@ final class WatchNext {
     static final String PERMISSION = "android.permission.READ_TV_LISTINGS";
     /** Declared by apps that write the TV's lists (apps can also write their own rows and Watch Next without it). */
     private static final String WRITE_EPG = "com.android.providers.tv.permission.WRITE_EPG_DATA";
-    static final int PER_APP = 2, MAX = 12;
+    /** At most this many, most recently watched first, from any app (all of them from one app, if that's what you watched). */
+    static final int MAX = 12;
     /** Channel names that mean "continue watching" (apps name their own channel). */
     private static final Set<String> CHANNEL_NAMES = new HashSet<>(java.util.Arrays.asList(
             "continue watching", "seguir viendo", "continuar viendo", "continuar assistindo", "continue assistindo"));
@@ -98,13 +98,10 @@ final class WatchNext {
         }
         Collections.sort(all, (a, b) -> Long.compare(b.engaged, a.engaged));
         List<Item> out = new ArrayList<>();
-        Map<String, Integer> perApp = new HashMap<>();
         Set<String> seen = new HashSet<>();
         for (Item it : all) {
             String key = it.pkg + "|" + (it.intent != null ? it.intent : it.title);
-            int n = perApp.containsKey(it.pkg) ? perApp.get(it.pkg) : 0;
-            if (n >= (NetflixWatch.PKG.equals(it.pkg) ? NetflixWatch.MAX : PER_APP) || !seen.add(key)) continue;
-            perApp.put(it.pkg, n + 1);
+            if (!seen.add(key)) continue;
             it.app = appName(c, it.pkg);
             out.add(it);
             if (out.size() >= MAX) break;

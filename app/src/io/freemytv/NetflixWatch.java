@@ -51,7 +51,7 @@ final class NetflixWatch {
     /** The history is read page by page until it's this old (that page's titles count), and this many titles are looked at. */
     private static final long DAYS = 120;
     private static final int TITLES = 12, PAGE = 20, PAGES = 8;
-    static final int MAX = 4;   // Netflix's own row is already chosen: more of it than of other apps (WatchNext.PER_APP)
+    static final int MAX = WatchNext.MAX;   // as many as the row holds: it's ordered by when you watched, not by app
 
     private static final ExecutorService IO = Ui.background(1);
     private static final Handler MAIN = new Handler(Looper.getMainLooper());

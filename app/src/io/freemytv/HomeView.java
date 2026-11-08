@@ -5135,7 +5135,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             rim.setAlpha(255);
             c.restore();
         }
-        drawCardLine(c, watchTitles[i], it.pkg, watchDetails[i], watchTags[i], textLeft, textLeft + watchRects[i].width(), textTop, open);
+        drawCardLine(c, watchTitles[i], it.pkg, watchDetails[i], watchTags[i], textLeft, textLeft + watchRects[i].width(), textTop, open, -1);
     }
 
     /** Resumes it where you left it (the app's own link); if that link can't be used, the app itself. */
@@ -5739,13 +5739,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (p == null || base.left < 0 || base.left > (CONTENT_R - 100) * k) return;
         if (watchTab() && i < watching.size() && watchDetails != null && i < watchDetails.length) {
             WatchNext.Item it = watching.get(i);
-            drawCardLine(c, watchTitles[i], it.pkg, watchDetails[i], watchTags[i], cardLines[i].left, cardLines[i].right, base.bottom, open);
+            drawCardLine(c, watchTitles[i], it.pkg, watchDetails[i], watchTags[i], cardLines[i].left, cardLines[i].right, base.bottom, open, -1);
         } else {
             // Explore: the service it's on as its icon, so the details on the right leave the service's name out.
             String pkg = p.servicePkg != null ? p.servicePkg : p.pkg, meta = p.meta;
             if (p.appLabel != null && pkg != null && meta != null && meta.endsWith(" · " + p.appLabel)) meta = meta.substring(0, meta.length() - p.appLabel.length() - 3);
             else if (p.appLabel != null && p.appLabel.equals(meta)) meta = "";
-            drawCardLine(c, p.title, pkg, meta, p.tag, cardLines[i].left, cardLines[i].right, base.bottom, open);
+            drawCardLine(c, p.title, pkg, scoredMeta(meta, p.audience), p.tag, cardLines[i].left, cardLines[i].right, base.bottom, open, p.audience);
         }
     }
 
@@ -5820,7 +5820,56 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * right edge (`wide` on the opened card: episode and time left, or genre and length; `narrow` on a narrow one),
      * cross-fading as the card widens.
      */
-    private void drawCardLine(Canvas c, String title, String pkg, String wide, String narrow, float left, float right, float bottom, float open) {
+    /** "86% · Drama · 1h 52m": the audience score before the details, made once per score and details. */
+    private String scoredMeta(String meta, int audience) {
+        if (audience < 0) return meta;
+        String key = audience + "\u0000" + meta;
+        String s = scoredMetas.get(key);
+        if (s == null) {
+            s = meta == null || meta.isEmpty() ? audience + "%" : audience + "% · " + meta;
+            if (scoredMetas.size() > 200) scoredMetas.clear();
+            scoredMetas.put(key, s);
+        }
+        return s;
+    }
+
+    private final java.util.HashMap<String, String> scoredMetas = new java.util.HashMap<>();
+    private Bitmap popcorn;
+    private final Paint popcornPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    /** The popcorn bucket before an audience score (TV px, at the opened card's size). */
+    private static final float POPCORN = 22, POPCORN_GAP = 7;
+
+    /** A plain popcorn bucket (white with red stripes, kernels on top), drawn once at `px`: not Rotten Tomatoes' logo. */
+    private static Bitmap popcornIcon(int px) {
+        Bitmap b = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        float u = px / 16f;
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        android.graphics.Path bucket = new android.graphics.Path();
+        bucket.moveTo(3.2f * u, 6.5f * u);
+        bucket.lineTo(12.8f * u, 6.5f * u);
+        bucket.lineTo(11.5f * u, 15.4f * u);
+        bucket.lineTo(4.5f * u, 15.4f * u);
+        bucket.close();
+        p.setColor(0xFFF5F0E6);
+        c.drawPath(bucket, p);
+        p.setColor(0xFFE0412E);
+        android.graphics.Path stripe = new android.graphics.Path();
+        stripe.moveTo(5.3f * u, 6.5f * u); stripe.lineTo(6.6f * u, 6.5f * u); stripe.lineTo(7.1f * u, 15.4f * u); stripe.lineTo(6.0f * u, 15.4f * u); stripe.close();
+        stripe.moveTo(9.4f * u, 6.5f * u); stripe.lineTo(10.7f * u, 6.5f * u); stripe.lineTo(10.0f * u, 15.4f * u); stripe.lineTo(8.9f * u, 15.4f * u); stripe.close();
+        c.drawPath(stripe, p);
+        p.setColor(0xFFFFE7A8);
+        c.drawCircle(5 * u, 5.2f * u, 1.9f * u, p);
+        c.drawCircle(11 * u, 5.2f * u, 1.9f * u, p);
+        p.setColor(0xFFFFF2C8);
+        c.drawCircle(8 * u, 4.1f * u, 2.2f * u, p);
+        c.drawCircle(9.6f * u, 2.7f * u, 1.4f * u, p);
+        p.setColor(0xFFFFF7DE);
+        c.drawCircle(6.6f * u, 2.6f * u, 1.4f * u, p);
+        return b;
+    }
+
+    private void drawCardLine(Canvas c, String title, String pkg, String wide, String narrow, float left, float right, float bottom, float open, int audience) {
         float baseline = bottom + 50 * k;
         float size = (36 + (LINE_ICON - 36) * open) * k, x = left;
         Bitmap icon = watchIcon(pkg);
@@ -5838,7 +5887,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         // Room for the details: each at its full width while it's well visible, giving it back gradually as it fades out.
         // A cut-off at the end of the fade freed it all on one frame, and the title jumped longer as the card settled.
         float detailW = 0;
-        if (wide != null && !wide.isEmpty()) detailW = Math.max(detailW, lCardMeta.measureText(wide) * fm * Ui.clamp(open * 2));
+        boolean scored = audience >= 0 && wide != null && !wide.isEmpty();
+        float scoreRoom = scored ? (POPCORN + POPCORN_GAP) * k : 0;   // the popcorn bucket before the score
+        if (wide != null && !wide.isEmpty()) detailW = Math.max(detailW, (lCardMeta.measureText(wide) + scoreRoom) * fm * Ui.clamp(open * 2));
         if (narrow != null) detailW = Math.max(detailW, lCardMeta.measureText(narrow) * fm * Ui.clamp((1 - open) * 2));
         float titleW = Math.max(40 * k, right - x - (detailW + Math.min(16 * k, detailW)));
         c.save();
@@ -5852,6 +5903,15 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         if (open > 0.02f && wide != null && !wide.isEmpty()) {
             lCardMeta.setAlpha(Math.round(a * open));
             c.drawText(wide, right, metaBase, lCardMeta);
+            // On the selected (opened) card only: its audience score, after a popcorn bucket, fading in as it opens.
+            if (scored) {
+                int px = Math.max(8, Math.round(POPCORN * k));
+                if (popcorn == null || popcorn.getWidth() != px) popcorn = popcornIcon(px);
+                float iconRight = right - lCardMeta.measureText(wide) - POPCORN_GAP * k, cy = metaBase - Ui.halfCap(lCardMeta);
+                tmp.set(iconRight - POPCORN * k, cy - POPCORN * k / 2 - 1 * k, iconRight, cy + POPCORN * k / 2 - 1 * k);
+                popcornPaint.setAlpha(Math.round(255 * open));
+                c.drawBitmap(popcorn, null, tmp, popcornPaint);
+            }
         }
         if (open < 0.98f && narrow != null) {
             lCardMeta.setAlpha(Math.round(a * (1 - open)));

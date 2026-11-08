@@ -57,6 +57,8 @@ final class Recs {
         String tag;             // Trakt: "Up next: S2 E5", "On your watchlist"…, first in the meta; else null
         int mine;               // Trakt: PROGRESS, LIKED (watchlist, recommended) or 0 (TMDB's)
         boolean detailed;
+        boolean horror;         // a horror title (its genre, or for a show its keywords): left out of the picks
+        int audience = -1;      // Rotten Tomatoes' audience score (%) from RtPopular, or -1
         java.io.File photo;     // one of your own photos (Photos): no title, no caption
     }
 
@@ -84,9 +86,12 @@ final class Recs {
     /** How often Trakt is asked whether the account changed (marked watched, the watchlist): one small request. */
     private static final long TRAKT_EVERY = 10 * 60_000L;
     /** Bump when what is saved for each title changes (the saved list is discarded and fetched again). */
-    private static final int CACHE_VERSION = 8;   // 7: each title's logo and best-rated backdrop
+    private static final int CACHE_VERSION = 9;   // 9: horror and the audience score   // 7: each title's logo and best-rated backdrop
     /** TMDB's titles in the list (trending, then the new releases), as on main. */
     private static final int POOL = 24;
+    /** At most this many of each kind from Rotten Tomatoes' popular list (each costs a TMDB search and its details). */
+    private static final int RT_MAX = POOL / 2;
+    private static final int HORROR = 27;
     /** Trakt's titles in the list: about what the tabs show of them (now(): up to 2 in 5 in progress, 3 in 5 liked). */
     private static final int TRAKT_MAX = MAX_CARDS;
     /** By subscription, with ads (Pluto TV) or free: never rent or buy. */
@@ -388,7 +393,7 @@ final class Recs {
         List<Pick> progress = new ArrayList<>(), liked = new ArrayList<>(), list = new ArrayList<>();
         Map<String, Boolean> have = new HashMap<>();   // one look per app, not per title (this runs every 15 s)
         for (Pick p : picks) {
-            if ((kind == null || kind.equals(p.kind))
+            if ((kind == null || kind.equals(p.kind)) && !p.horror
                     && (!p.detailed || (p.pkg != null && have.computeIfAbsent(p.pkg, this::installed)
                     && (p.servicePkg == null || have.computeIfAbsent(p.servicePkg, this::installed))))) {   // app missing or switched off: skip
                 (p.mine == PROGRESS ? progress : p.mine == LIKED ? liked : list).add(p);
@@ -402,7 +407,9 @@ final class Recs {
         java.util.Set<String> seen = new java.util.HashSet<>();
         take(out, seen, progress, 0, Math.max(1, cards * 2 / 5));
         take(out, seen, liked, hour * cards, Math.max(2, cards * 3 / 5));
-        take(out, seen, list, hour * cards, cards);
+        // The Explore tabs show the list in its order (most popular first); the home screen's picks (both kinds)
+        // still bring a new set each hour.
+        take(out, seen, list, kind == null ? hour * cards : 0, cards);
         take(out, seen, progress, 0, cards);
         take(out, seen, liked, hour * cards, cards);
         return out;
@@ -814,21 +821,45 @@ final class Recs {
         String common = "&language=" + lang() + "&watch_region=" + REGION + "&with_watch_monetization_types=" + WATCH_TYPES + "&include_adult=false"
                 + "&sort_by=popularity.desc&with_watch_providers=" + URLEncoder.encode(ids.toString(), "UTF-8")
                 + (Prefs.hideAnimation() ? "&without_genres=" + ANIMATION : "");
-        // 1. Trending this week (TMDB goes by what people are watching and searching for right now), only what is
-        //    on one of the TV's services: the details say where (and are then ready).
+        // 1. What's popular now: Rotten Tomatoes' list of titles people look up on its site this week, among those Fresh
+        //    with critics and liked by audiences, in its order, only what's on one of the TV's services and no horror.
+        //    TMDB's own trending counts visits to its pages, which a service's promotion drives up (a new original
+        //    with a 5.8/10 came second there). Where that list can't be read or has too few, TMDB's weekly trending
+        //    fills in, keeping titles people have rated (100 votes or more).
         List<Pick> hotMovies = new ArrayList<>(), hotShows = new ArrayList<>();
         for (String kind : new String[] {"movie", "tv"}) {
-            JSONArray hot = get("/trending/" + kind + "/week?language=" + lang()).getJSONArray("results");
+            List<Pick> hot = kind.equals("movie") ? hotMovies : hotShows;
+            java.util.Set<String> have = new HashSet<>();
+            try {
+                for (RtPopular.Title t : RtPopular.fetch(kind)) {
+                    if (hot.size() >= RT_MAX) break;
+                    Pick pick = match(kind, t);
+                    if (pick == null || watched.contains(key(pick)) || !have.add(key(pick))) continue;
+                    pick.audience = t.audience;
+                    try {
+                        if (!reuse(pick, known)) fetchDetails(pick);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    if (pick.pkg != null && !pick.horror) hot.add(pick);
+                }
+            } catch (Exception e) {
+                AppLog.w("rotten tomatoes: " + e.getMessage());
+            }
+            if (hot.size() >= MAX_CARDS) continue;
+            JSONArray trending = get("/trending/" + kind + "/week?language=" + lang()).getJSONArray("results");
             List<Pick> candidates = new ArrayList<>();
-            for (int i = 0; i < hot.length() && i < 20; i++) add(candidates, hot.getJSONObject(i), kind);
+            for (int i = 0; i < trending.length() && i < 20; i++) {
+                if (trending.getJSONObject(i).optInt("vote_count") >= 100) add(candidates, trending.getJSONObject(i), kind);
+            }
             for (Pick pick : candidates) {
-                if (watched.contains(key(pick))) continue;
+                if (watched.contains(key(pick)) || !have.add(key(pick))) continue;
                 try {
                     if (!reuse(pick, known)) fetchDetails(pick);
                 } catch (Exception e) {
                     continue;
                 }
-                if (pick.pkg != null) (kind.equals("movie") ? hotMovies : hotShows).add(pick);
+                if (pick.pkg != null && !pick.horror) hot.add(pick);
             }
         }
         // 2. Recent releases on the TV's services: movies from the past year and shows with a new episode in the
@@ -931,6 +962,35 @@ final class Recs {
         return true;
     }
 
+    /**
+     * TMDB's title for one of Rotten Tomatoes' (by its English name, and for a movie its year, give or take one); null when
+     * none matches exactly.
+     */
+    private Pick match(String kind, RtPopular.Title t) {
+        try {
+            JSONArray found = get("/search/" + kind + "?language=en-US&include_adult=false&query=" + URLEncoder.encode(t.title, "UTF-8"))
+                    .getJSONArray("results");
+            String want = titleKey(t.title);
+            for (int i = 0; i < found.length() && i < 8; i++) {
+                JSONObject o = found.getJSONObject(i);
+                if (!want.equals(titleKey(o.optString(kind.equals("movie") ? "title" : "name")))) continue;
+                String date = o.optString(kind.equals("movie") ? "release_date" : "first_air_date");
+                if (kind.equals("movie") && t.year > 0 && date.length() >= 4 && Math.abs(Integer.parseInt(date.substring(0, 4)) - t.year) > 1) continue;
+                List<Pick> one = new ArrayList<>();
+                add(one, o, kind);   // no picture, horror by its genre, or animation left out: none
+                return one.isEmpty() ? null : one.get(0);
+            }
+        } catch (Exception e) {
+            AppLog.w("rotten tomatoes: " + t.title + ": " + e.getMessage());
+        }
+        return null;
+    }
+
+    /** A title to compare by: lower case, letters and digits only ("Ali G: Who Iz I?" → "aligwhoizi"). */
+    private static String titleKey(String title) {
+        return title == null ? "" : title.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
     /** The details of the same title in the list before (`known`), with this one's tag; false: not there. */
     private static boolean reuse(Pick p, Map<String, Pick> known) {
         Pick k = known.get(key(p));
@@ -943,6 +1003,7 @@ final class Recs {
         p.servicePkg = k.servicePkg;
         p.appLabel = k.appLabel;
         p.link = k.link;
+        p.horror = k.horror;
         String meta = k.meta == null ? "" : k.meta;
         if (k.tag != null && meta.startsWith(k.tag)) meta = meta.substring(k.tag.length()).replaceFirst("^ · ", "");
         p.meta = p.tag == null ? meta : meta.isEmpty() ? p.tag : p.tag + " · " + meta;
@@ -1009,6 +1070,8 @@ final class Recs {
         String backdrop = o.optString("backdrop_path", "");
         if (backdrop.isEmpty() || "null".equals(backdrop)) return;
         if (Prefs.hideAnimation() && animated(o)) return;
+        JSONArray ids = o.optJSONArray("genre_ids");
+        for (int i = 0; ids != null && i < ids.length(); i++) if (ids.optInt(i) == HORROR) return;   // no horror in the picks
         Pick p = new Pick();
         p.id = o.optInt("id");
         p.kind = kind;
@@ -1016,6 +1079,23 @@ final class Recs {
         p.backdrop = backdrop;
         p.poster = o.isNull("poster_path") ? "" : o.optString("poster_path");
         list.add(p);
+    }
+
+    /**
+     * Horror: TMDB's Horror genre for a movie; shows have no such genre on TMDB, so for them the keywords say it
+     * ("horror", "supernatural horror", "slasher"…: IT: Welcome to Derry, American Horror Story).
+     */
+    private static boolean horror(JSONObject o) {
+        JSONArray genres = o.optJSONArray("genres");
+        for (int i = 0; genres != null && i < genres.length(); i++) if (genres.optJSONObject(i).optInt("id") == HORROR) return true;
+        JSONObject k = o.optJSONObject("keywords");
+        JSONArray words = k == null ? null : k.has("keywords") ? k.optJSONArray("keywords") : k.optJSONArray("results");
+        for (int i = 0; words != null && i < words.length(); i++) {
+            String w = words.optJSONObject(i).optString("name").toLowerCase(Locale.ROOT);
+            if (w.equals("horror") || w.equals("supernatural horror") || w.equals("slasher") || w.equals("body horror")
+                    || w.equals("zombie") || w.equals("horror anthology") || w.equals("folk horror")) return true;
+        }
+        return false;
     }
 
     private static boolean animated(JSONObject o) {
@@ -1036,7 +1116,7 @@ final class Recs {
     /** Genre, runtime (or seasons) and the service it's on, among the ones the TV has. */
     private void fetchDetails(Pick p) throws Exception {
         JSONObject o = get("/" + p.kind + "/" + p.id
-                + "?language=" + lang() + "&append_to_response=watch/providers,images" + (Config.OPEN_IN_STREMIO ? ",external_ids" : "") + "&include_image_language=null," + Ui.language.replaceAll("-.*", "") + ",en");
+                + "?language=" + lang() + "&append_to_response=watch/providers,images,keywords" + (Config.OPEN_IN_STREMIO ? ",external_ids" : "") + "&include_image_language=null," + Ui.language.replaceAll("-.*", "") + ",en");
         p.title = title(p, o);
         String poster = o.optString("poster_path", "");
         if (!poster.isEmpty() && !"null".equals(poster)) p.poster = poster;
@@ -1047,6 +1127,7 @@ final class Recs {
         p.logo = bestLogo(o.optJSONObject("images"));
         List<String> parts = new ArrayList<>();
         JSONArray genres = o.optJSONArray("genres");
+        p.horror = horror(o);
         if (p.kind.equals("tv")) parts.add(Ui.tr("Series"));
         if (genres != null && genres.length() > 0) {
             String name = genres.getJSONObject(0).optString("name");
@@ -1800,7 +1881,7 @@ final class Recs {
                         .put("meta", p.meta).put("appLabel", p.appLabel == null ? "" : p.appLabel).put("app", p.app == null ? "" : p.app).put("pkg", p.pkg == null ? "" : p.pkg)
                         .put("servicePkg", p.servicePkg == null ? "" : p.servicePkg)
                         .put("tag", p.tag == null ? "" : p.tag).put("mine", p.mine).put("detailed", p.detailed)
-                        .put("logo", p.logo == null ? "" : p.logo));
+                        .put("logo", p.logo == null ? "" : p.logo).put("horror", p.horror).put("audience", p.audience));
             }
             SharedPreferences.Editor e = cache.edit().putString("picks", a.toString()).putInt("period", period).putLong("listAt", listAt)
                     .putString("traktActivity", traktActivity).putLong("traktStamp", traktStamp)
@@ -1836,6 +1917,8 @@ final class Recs {
             p.mine = o.optInt("mine");
             p.detailed = o.optBoolean("detailed");
             p.logo = o.optString("logo").isEmpty() ? null : o.optString("logo");
+            p.horror = o.optBoolean("horror");
+            p.audience = o.optInt("audience", -1);
             out.add(p);
         }
         return out;
