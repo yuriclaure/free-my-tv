@@ -1441,7 +1441,25 @@ final class Recs {
 
     private boolean needsLink(Pick p) {
         return linksOn() && p.id > 0 && p.pkg != null && p.link == null
-                && cache.getString(linkKey(p), null) == null && System.currentTimeMillis() >= linkRetryAt;
+                && savedLink(linkKey(p)) == null && System.currentTimeMillis() >= linkRetryAt;
+    }
+
+    /** How long "Watchmode has no link for it" holds: a title coming soon (or new to a service) gets one later. */
+    private static final long NO_LINK_FOR = 2 * 24 * 3600_000L;
+
+    /**
+     * The link looked up before: the address, "" when Watchmode had none (for 2 days, then null again), or null when
+     * it wasn't looked up. No link is saved as "-" and the time it was asked.
+     */
+    private String savedLink(String key) {
+        String s = cache.getString(key, null);
+        if (s == null || s.isEmpty()) return null;   // "" from before the 2 days: asked again once
+        if (!s.startsWith("-")) return s;
+        try {
+            return System.currentTimeMillis() - Long.parseLong(s.substring(1)) < NO_LINK_FOR ? "" : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
@@ -1456,7 +1474,7 @@ final class Recs {
     /** Sets p.link from what was looked up before, or looks it up (2 requests of the free plan's 2,500 a month). */
     private void findLink(Pick p) {
         if (!linksOn() || p.id < 0 || p.pkg == null || p.link != null) return;
-        String saved = cache.getString(linkKey(p), null);
+        String saved = savedLink(linkKey(p));
         if (saved != null) {
             p.link = saved.isEmpty() ? null : saved;
             return;
@@ -1484,7 +1502,7 @@ final class Recs {
                     if (same && s.optString("type").equals("sub") && s.optString("web_url").startsWith("https://")) link = s.optString("web_url");
                 }
             }
-            cache.edit().putString(linkKey(p), link).apply();
+            cache.edit().putString(linkKey(p), link.isEmpty() ? "-" + System.currentTimeMillis() : link).apply();
             p.link = link.isEmpty() ? null : link;
         } catch (Exception e) {
             if ("Watchmode returned HTTP 401".equals(e.getMessage())) {

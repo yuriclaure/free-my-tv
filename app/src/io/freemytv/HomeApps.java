@@ -643,6 +643,27 @@ final class HomeApps {
         return open(a, it, ActivityOptions.makeScaleUpAnimation(from, x, y, Math.max(w, 1), Math.max(h, 1)).toBundle());
     }
 
+    private static final Pattern UUID = Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    private static final Pattern HBO_WEB = Pattern.compile("https://(www\\.)?(hbo)?max\\.com/.*");
+
+    /**
+     * A title's address as its app takes it. HBO Max's app answers only play.hbomax.com and play.max.com, while
+     * Watchmode gives its website's (www.hbomax.com/movies/<name>/<id>, with or without a country): Android found
+     * nothing for those, and the app opened on its home. The same title on play.hbomax.com opens its page.
+     */
+    static String appLink(String uri) {
+        if (!HBO_WEB.matcher(uri).matches()) return uri;
+        java.util.regex.Matcher id = UUID.matcher(uri);
+        if (!id.find()) return uri;
+        String path = uri.toLowerCase(java.util.Locale.ROOT);
+        String kind = path.contains("/movie") || path.contains("/feature") ? "movie"
+                : path.contains("/show") || path.contains("/series") ? "show" : null;
+        if (kind == null) return uri;
+        String app = "https://play.hbomax.com/" + kind + "/" + id.group();
+        AppLog.w("HBO Max link " + uri + " -> " + app);
+        return app;
+    }
+
     /** Opens the item; `options` for the transition, or null (the screensaver has no card to grow out of). */
     static boolean open(Context a, Item it, android.os.Bundle options) {
         NetflixWatch.lastApp = it.pkg;   // back home after Netflix, its Continue Watching is read again
@@ -654,7 +675,7 @@ final class HomeApps {
                 plain = intent;
                 if (plain != null) plain.addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
                 if (intent != null && it.uri != null) {
-                    intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(it.uri)).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(it.pkg);
+                    intent = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(appLink(it.uri))).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(it.pkg);
                     // Netflix ignores the title's address when it is already open or when no source is named: it opens its own home.
                     // Like the TV launchers do, name its activity and the source (30) and start it in a fresh task.
                     if ("com.netflix.ninja".equals(it.pkg) && plain != null && plain.getComponent() != null) {
@@ -691,7 +712,7 @@ final class HomeApps {
             a.startActivity(intent, options);
             return true;
         } catch (ActivityNotFoundException | SecurityException e) {
-            AppLog.w("couldn't open " + it.label + ": " + e.getMessage());
+            AppLog.w("couldn't open " + it.label + (it.uri != null ? " at " + it.uri : "") + ": " + e.getMessage());
             if (plain == null || plain == intent) return false;
             plain.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
