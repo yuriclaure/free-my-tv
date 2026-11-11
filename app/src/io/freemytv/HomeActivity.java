@@ -27,6 +27,7 @@ public class HomeActivity extends Activity {
         Watchdog.install(this);
         SleepTimer.listen(this);
         SleepTimer.check(this);
+        Soundbar.watch(this);   // a soundbar that stayed off when the TV came on (Sony)
         if (Watchdog.crashedTooOften(this)) {
             // Don't try to draw again: only show a notice while the main process restores the original home screen.
             HomeMode.requestRevertHome(this);
@@ -91,6 +92,7 @@ public class HomeActivity extends Activity {
             home.showAllApps();
             return;
         }
+        Soundbar.homePressed(this);   // the soundbar on ARC: asked to wake on every Home (Sony)
         long now = SystemClock.uptimeMillis();
         boolean twice = Prefs.recents().equals("home") && lastHome != 0 && now - lastHome < TWICE_MS;
         lastHome = twice ? 0 : now;

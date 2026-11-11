@@ -32,6 +32,8 @@
     <queries>
         <!-- Optional App Store top button: Google Play or Amazon Appstore. -->
         <package android:name="com.android.vending" />
+        <!-- Sony's Bravia Sync service: wakes an ARC soundbar that stayed off (Soundbar). -->
+        <package android:name="com.sony.dtv.braviasyncservice" />
         <package android:name="com.amazon.venezia" />
         <package android:name="com.netflix.ninja" />
         <package android:name="com.google.android.youtube.tv" />
@@ -322,5 +324,15 @@
              permission apps can't have. -->
         <receiver android:name=".RemoteFix" android:exported="true" android:permission="android.permission.DUMP"
             android:process=":home" />
+        <!-- Soundbar refresh (Sony): sound to the TV and back, which wakes the soundbar on ARC. No screen; for apps that
+             map the remote's buttons to an activity. -->
+        <activity android:name=".SoundbarRefresh" android:exported="true" android:label="Soundbar refresh"
+            android:process=":home" android:theme="@android:style/Theme.NoDisplay" android:excludeFromRecents="true"
+            android:noHistory="true" android:taskAffinity="">
+            <intent-filter>
+                <action android:name="io.freemytv.SOUNDBAR_REFRESH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
