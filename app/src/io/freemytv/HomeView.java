@@ -892,6 +892,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
      * pick, drawer and sheet closed.
      */
     void reset(boolean animated) {
+        pickChoose = false;
         wake();
         cancelReorder(!animated);
         closeMenu(!animated);
@@ -3534,6 +3535,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             return handled;
         }
         if (searchOpen && searchKey(e)) return true;
+        if (pickChoose && !searchOpen && pickKey(e)) return true;
         if (down && e.getKeyCode() == KeyEvent.KEYCODE_APP_SWITCH && !Prefs.recents().equals("off")) {
             openRecents();
             return true;
@@ -3819,11 +3821,19 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             click.open();
             openWatching(watching.get(cardIndex));
             return;
-        } else if (zone == Z_CARDS) {
+        } else if (zone == Z_CARDS) {   // first its details (the synopsis, its apps, the trailer); OK again opens one
             Recs.Pick p = cardIndex < cards.size() ? cards.get(cardIndex) : null;
-            if (p == null || p.pkg == null) return;
-            it = HomeApps.app(p.pkg, Recs.serviceName(p), p.link);
-            r = cardRects[cardIndex];
+            if (p == null) return;
+            if (!choosingCard()) {
+                pickChoose = true;
+                openChoice(p);
+                heroDirty = true;
+                click.move();
+                wake();
+                return;
+            }
+            openChosen(p);
+            return;
         } else {
             if (shelf.isEmpty()) return;
             it = shelf.get(shelfIndex);
@@ -5441,6 +5451,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void selectTab(int index) {
+        pickChoose = false;
         if (index == tab) return;
         tab = index;
         // A tab opens at its first pick, its row at the start: at once, as sliding back would first show the new
@@ -5774,7 +5785,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         grayImage = false;
         if (p != null && p.notOn) drawNotOnPill(c, s);
-        boolean choosing = searchOpen && searchZone == SZ_CHOOSE && i == cardIndex && p != null;
+        boolean choosing = choosingCard() && i == cardIndex && p != null;
+        // The card you stopped on (it has finished opening): its details are fetched now, so OK shows them at once.
+        // Cards passed on the way don't open that far, and aren't asked for.
+        if (p != null && i == cardIndex && open > 0.95f && !p.extraAsked && !watchTab() && zone == Z_CARDS) fetchExtra(p);
         if (p != null && p.logo != null && open > 0.02f && !choosing) drawCardLogo(c, p, open, r);   // every tab: the opened card's logo
         if (choosing) drawSearchChoice(c, p, r);
         if (f > 0.01f) {
@@ -5910,6 +5924,18 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     // What the row says when it has no cards for what was typed: "No results for …" or that search couldn't reach
     // IMDb (made once per answer, not per frame); null while there's nothing to say.
     private String searchNote, searchNoteSub;
+    // The opened card's details (Explore's after OK, search's after OK): its synopsis, and its buttons in a strip (every
+    // app that has it, then its trailer on YouTube). pickChoose: Explore's are showing.
+    private boolean pickChoose;
+    private int chosenId;
+    private String chosenKind;
+    private final List<String[]> choices = new ArrayList<>();
+    private static final String TRAILER = "trailer";
+    private String youtube;
+    private boolean youtubeAsked;
+    private android.text.StaticLayout synopsis;
+    private Recs.Pick synopsisFor;
+    private int synopsisW;
     private int keyMode;   // KM_LETTERS, KM_NUMBERS, KM_SYMBOLS (Play/Pause goes round them, as on Apple TV)
     private static final int KM_LETTERS = 0, KM_NUMBERS = 1, KM_SYMBOLS = 2;
     // Holding OK on a letter: its accented forms above the keys (← → and OK pick one, Back leaves them).
@@ -5985,6 +6011,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     }
 
     private void openSearch() {
+        pickChoose = false;
         searchOpen = true;
         searchShow.target = 1;
         searchZone = SZ_KEYS;
@@ -6173,7 +6200,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 break;
             default:   // the choice inside the card
                 Recs.Pick p = cardIndex < cards.size() ? cards.get(cardIndex) : null;
-                int n = p == null || p.apps == null ? 0 : p.apps.size();
+                int n = choices.size();
                 if (dx != 0 && n > 0) {
                     int next = Math.max(0, Math.min(n - 1, chooseIndex + dx));
                     if (next == chooseIndex) return;
@@ -6213,22 +6240,14 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         Recs.Pick p = cardIndex < cards.size() ? cards.get(cardIndex) : null;
         if (p == null) return;
-        if (searchZone == SZ_CARDS) {   // the choice opens inside the card
+        if (searchZone == SZ_CARDS) {   // the details open inside the card
             searchZone = SZ_CHOOSE;
-            chooseIndex = 0;
+            openChoice(p);
             heroDirty = true;
             click.move();
             return;
         }
-        if (p.notOn || p.apps == null || chooseIndex >= p.apps.size()) return;
-        click.open();
-        final String[] app = p.apps.get(chooseIndex);
-        final RectF r = new RectF(cardRects[cardIndex]);
-        SEARCH.execute(() -> {   // its own page in that app when Watchmode knows it, else the app's home
-            String link = recs.searchLink(p, app[0], app[1]);
-            post(() -> HomeApps.open(activity, HomeApps.app(app[1], app[2], link), this,
-                    Math.round(r.left), Math.round(r.top), Math.round(r.width()), Math.round(r.height())));
-        });
+        openChosen(p);
     }
 
     private void searchBack() {
@@ -6493,6 +6512,153 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         });
     }
 
+    /** The opened card's details are showing (search's or Explore's). */
+    private boolean choosingCard() {
+        if (searchOpen) return searchZone == SZ_CHOOSE;
+        // Explore: still the card it was opened on (the picks refresh every 15 s and may move or replace it)
+        if (!pickChoose || zone != Z_CARDS || cardIndex >= cards.size()) return false;
+        Recs.Pick p = cards.get(cardIndex);
+        return p.id == chosenId && java.util.Objects.equals(p.kind, chosenKind);
+    }
+
+    /** OK on a card: its buttons, and (once per card) its synopsis, trailer and every app that has it. */
+    private void openChoice(final Recs.Pick p) {
+        chosenId = p.id;
+        chosenKind = p.kind;
+        chooseIndex = 0;
+        buildChoices(p);
+        fetchExtra(p);
+    }
+
+    private void fetchExtra(final Recs.Pick p) {
+        if (p.extraAsked) return;
+        p.extraAsked = true;   // here too: the draw that asks runs again before the request starts
+        SEARCH.execute(() -> {
+            p.extraAsked = false;
+            recs.extra(p);
+            post(() -> {
+                if (p.trailer != null && youtube() != null) watchIcon(youtube);   // the Trailer button's icon, ready too
+                if (choosingCard() && cardIndex < cards.size() && cards.get(cardIndex) == p) buildChoices(p);
+                heroDirty = true;
+                wake();
+            });
+        });
+    }
+
+    private void buildChoices(Recs.Pick p) {
+        choices.clear();
+        if (!p.notOn) {
+            if (p.apps != null && !p.apps.isEmpty()) choices.addAll(p.apps);
+            else if (p.pkg != null) choices.add(new String[] {p.app, p.pkg, Recs.serviceName(p)});
+        }
+        if (p.trailer != null && youtube() != null) choices.add(new String[] {TRAILER, youtube, Ui.tr("Trailer")});
+        chooseIndex = Math.max(0, Math.min(chooseIndex, choices.size() - 1));
+    }
+
+    /** YouTube's app for the trailers (Android TV's, Fire TV's, or the phone one), or null. */
+    private String youtube() {
+        if (!youtubeAsked) {
+            youtubeAsked = true;
+            for (String pkg : new String[] {"com.google.android.youtube.tv", "com.amazon.firetv.youtube", "com.google.android.youtube"}) {
+                try {
+                    getContext().getPackageManager().getPackageInfo(pkg, 0);
+                    youtube = pkg;
+                    break;
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return youtube;
+    }
+
+    /** OK on a button in the card: the title in that app (its own page when Watchmode knows it), or the trailer. */
+    private void openChosen(final Recs.Pick p) {
+        if (chooseIndex >= choices.size() || cardIndex >= cardRects.length) return;
+        final String[] app = choices.get(chooseIndex);
+        click.open();
+        final RectF r = new RectF(cardRects[cardIndex]);
+        if (TRAILER.equals(app[0])) {
+            HomeApps.open(activity, HomeApps.app(app[1], "YouTube", "https://www.youtube.com/watch?v=" + p.trailer), this,
+                    Math.round(r.left), Math.round(r.top), Math.round(r.width()), Math.round(r.height()));
+            return;
+        }
+        if (!searchOpen && app[1].equals(p.pkg) && p.link != null) {   // the pick's own app: its link is known
+            HomeApps.open(activity, HomeApps.app(app[1], app[2], p.link), this,
+                    Math.round(r.left), Math.round(r.top), Math.round(r.width()), Math.round(r.height()));
+            return;
+        }
+        SEARCH.execute(() -> {
+            String link = recs.searchLink(p, app[0], app[1]);
+            post(() -> HomeApps.open(activity, HomeApps.app(app[1], app[2], link), this,
+                    Math.round(r.left), Math.round(r.top), Math.round(r.width()), Math.round(r.height())));
+        });
+    }
+
+    /** Explore's opened card: ← → between its buttons; ↑ ↓ and Back close it. OK goes on to activate(). */
+    private boolean pickKey(KeyEvent e) {
+        if (zone != Z_CARDS || watchTab() || !choosingCard()) {
+            pickChoose = false;
+            heroDirty = true;
+            return false;
+        }
+        boolean down = e.getAction() == KeyEvent.ACTION_DOWN;
+        switch (e.getKeyCode()) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                if (down) {
+                    int next = Math.max(0, Math.min(choices.size() - 1, chooseIndex + (e.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1)));
+                    if (next != chooseIndex) {
+                        chooseIndex = next;
+                        heroDirty = true;
+                        click.move();
+                        wake();
+                    }
+                }
+                return true;
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+            case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_ESCAPE:
+                if (down && e.getRepeatCount() == 0) {
+                    pickChoose = false;
+                    heroDirty = true;
+                    click.move();
+                    wake();
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * The synopsis laid out for the opened card, as large as it fits whole: TMDB's run from a line to ~1,300 characters
+     * (835 popular titles: median 235, 90% under 475, 99% under 864), so the size steps down from 30 px until all of it
+     * fits; only past the smallest (~760 characters) is the end cut. Made again only when the card's width changes.
+     */
+    private android.text.StaticLayout synopsisLayout(Recs.Pick p, int width, float maxHeight) {
+        if (synopsis != null && synopsisFor == p && Math.abs(synopsisW - width) < 8) return synopsis;
+        width = Math.max(1, width);
+        android.text.StaticLayout lay = null;
+        for (float size : SYNOPSIS_SIZES) {
+            android.text.TextPaint paint = new android.text.TextPaint(Paint.ANTI_ALIAS_FLAG);
+            paint.setTypeface(Ui.medium);
+            paint.setTextSize(size * k);
+            paint.setColor(0xF2FFFFFF);
+            int lines = Math.max(1, (int) (maxHeight / (paint.getFontSpacing() * 1.12f)));
+            lay = android.text.StaticLayout.Builder.obtain(p.overview, 0, p.overview.length(), paint, width)
+                    .setLineSpacing(0, 1.12f).setMaxLines(lines).setEllipsize(TextUtils.TruncateAt.END).build();
+            int last = lay.getLineCount() - 1;
+            if (lay.getEllipsisCount(last) == 0 && lay.getLineEnd(last) >= p.overview.length()) break;   // all of it fits
+        }
+        synopsis = lay;
+        synopsisFor = p;
+        synopsisW = width;
+        return synopsis;
+    }
+
+    private static final float[] SYNOPSIS_SIZES = {30, 28, 26, 24, 22};
+
     private void searchPaints() {
         if (lKey != null && lKey.getTextSize() == 34 * k) return;
         lKey = Ui.text(Ui.semibold, 34 * k, 0xFFFFFFFF);
@@ -6688,31 +6854,51 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
     }
 
-    /** Inside the opened card, after OK: "Open in" and its apps (the focused one dark), or where it is instead. */
+    /**
+     * Inside the opened card, after OK: its synopsis over the darkened picture, and a strip with "Open in" and its apps
+     * (the focused one dark), or where it is instead, and its trailer at the end.
+     */
     private void drawSearchChoice(Canvas c, Recs.Pick p, float r) {
         searchPaints();
-        float h = 132 * k, cy = cell.bottom - h / 2;
+        if (!p.extraAsked) fetchExtra(p);   // a card the picks' refresh replaced: its details again
+        float h = 132 * k, cy = cell.bottom - h / 2, stripTop = cell.bottom - h;
+        if (p.overview != null && !p.overview.isEmpty()) {
+            c.save();
+            c.clipRect(cell.left, cell.top, cell.right, stripTop);
+            fill.setShader(null);
+            fill.setColor(0xB8000000);
+            c.drawRoundRect(cell, r, r, fill);
+            c.restore();
+            float pad = 48 * k, room = stripTop - cell.top - 2 * 22 * k;
+            android.text.StaticLayout lay = synopsisLayout(p, Math.round(cell.width() - 2 * pad), room);
+            c.save();
+            c.translate(cell.left + pad, cell.top + (stripTop - cell.top - lay.getHeight()) / 2);
+            lay.draw(c);
+            c.restore();
+        }
         c.save();
-        c.clipRect(cell.left, cell.bottom - h, cell.right, cell.bottom);
+        c.clipRect(cell.left, stripTop, cell.right, cell.bottom);
         fill.setShader(null);
         fill.setColor(0xF5F6F7F9);
         c.drawRoundRect(cell, r, r, fill);
         c.restore();
         float x = cell.left + 40 * k;
-        if (p.notOn || p.apps == null || p.apps.isEmpty()) {
+        boolean noApp = choices.isEmpty() || TRAILER.equals(choices.get(0)[0]);
+        if (noApp) {
             c.drawText(Ui.tr("Not on your apps"), x, cy - 6 * k, lChoiceNo);
             String where = p.rent != null ? Ui.trf("Rent or buy: {stores}", "stores", p.rent) : Recs.upcoming(p) ? Ui.tr("Not streaming anywhere yet") : Ui.tr("Not available to stream");
             c.drawText(where, x, cy + 32 * k, lChoiceSub);
-            return;
+        } else {
+            String open = Ui.tr("Open in");
+            c.drawText(open, x, cy + Ui.halfCap(lChoice), lChoice);
+            x += lChoice.measureText(open) + 24 * k;
         }
-        String open = Ui.tr("Open in");
-        c.drawText(open, x, cy + Ui.halfCap(lChoice), lChoice);
-        x += lChoice.measureText(open) + 24 * k;
         float ph = 76 * k, icon = 46 * k;
-        for (int j = 0; j < p.apps.size(); j++) {
-            String[] app = p.apps.get(j);
-            boolean on = j == chooseIndex;
+        for (int j = 0; j < choices.size(); j++) {
+            String[] app = choices.get(j);
+            boolean on = j == chooseIndex, trailer = TRAILER.equals(app[0]);
             float w = 16 * k + icon + 14 * k + lPill.measureText(app[2]) + 28 * k;
+            if (trailer) x = Math.max(x, cell.right - 32 * k - w);   // the trailer at the strip's far end
             if (x + w > cell.right - 24 * k) break;
             tmp.set(x, cy - ph / 2, x + w, cy + ph / 2);
             fill.setColor(on ? 0xFF16181D : 0x1416181D);
@@ -6870,7 +7056,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         LOADER.execute(() -> {
             try {
                 watchIcons.put(pkg, SwitcherActivity.appIcon(ctx, pkg, px));
-                postInvalidate();
+                post(() -> {   // the cards' layer draws again only when told: an invalidate alone left the icon out
+                    heroDirty = true;
+                    invalidate();
+                    wake();
+                });
             } catch (RuntimeException | OutOfMemoryError e) {
                 AppLog.w("card icon " + pkg + ": " + e.getMessage());
             }

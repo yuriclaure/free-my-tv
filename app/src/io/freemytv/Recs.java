@@ -65,6 +65,9 @@ final class Recs {
         boolean notOn;          // none of the TV's apps has it
         int year;               // IMDb's year: the score's lookup, and remakes told apart
         int rank;               // IMDb's popularity rank (its MovieMeter: 1 is the most looked at), or MAX_VALUE
+        String overview;        // the synopsis (TMDB), once the card was opened (extra()); "" when TMDB has none
+        String trailer;         // its trailer's YouTube video id, or null
+        volatile boolean extraAsked, extraDone;
         volatile boolean scoreAsked;   // its audience score was looked up (audience stays -1 when there's none)
         java.io.File photo;     // one of your own photos (Photos): no title, no caption
     }
@@ -1104,6 +1107,70 @@ final class Recs {
             p.meta = (year > 0 ? year + " · " : "") + meta;
         }
         return p;
+    }
+
+    /**
+     * What an opened card shows (Explore's and search's): the synopsis, the trailer on YouTube and, for an Explore
+     * pick, every app on the TV that has it (search's know theirs already). One request; network, once per pick.
+     */
+    void extra(Pick p) {
+        if (p.extraAsked || p.id <= 0 || p.kind == null) return;
+        p.extraAsked = true;
+        try {
+            String lang = lang(), two = lang.length() >= 2 ? lang.substring(0, 2) : "en";
+            JSONObject o = get("/" + p.kind + "/" + p.id + "?language=" + lang + "&append_to_response=videos,watch/providers"
+                    + "&include_video_language=" + two + ",en,null");
+            String overview = o.optString("overview", "").trim();
+            if (overview.isEmpty() && !lang.startsWith("en")) {   // none in the TV's language: TMDB's English one
+                overview = get("/" + p.kind + "/" + p.id + "?language=en-US").optString("overview", "").trim();
+            }
+            p.overview = overview;
+            p.trailer = trailer(o.optJSONObject("videos"), two);
+            if (p.apps == null && !p.notOn) {   // Explore: every app on the TV that has it, the card's own first
+                JSONObject providers = o.optJSONObject("watch/providers");
+                JSONObject results = providers == null ? null : providers.optJSONObject("results");
+                JSONObject here = results == null ? null : results.optJSONObject(REGION);
+                List<String[]> apps = new ArrayList<>();
+                Set<String> seen = new HashSet<>();
+                if (p.app != null && p.pkg != null) {
+                    apps.add(new String[] {p.app, p.pkg, serviceName(p)});
+                    seen.add(p.pkg);
+                }
+                for (String type : new String[] {"flatrate", "ads", "free"}) {
+                    JSONArray list = here == null ? null : here.optJSONArray(type);
+                    for (int i = 0; list != null && i < list.length(); i++) {
+                        String[] svc = service(list.getJSONObject(i).optString("provider_name"), list.getJSONObject(i).optInt("provider_id"));
+                        if (svc != null && installed(svc[2]) && seen.add(svc[2])) apps.add(new String[] {svc[1], svc[2], name(svc[1])});
+                    }
+                }
+                p.apps = apps;
+            }
+        } catch (Exception e) {
+            AppLog.w("details: " + e.getMessage());
+            p.extraAsked = false;   // asked again the next time it's opened
+        }
+        p.extraDone = true;
+    }
+
+    /** The best trailer on YouTube: an official trailer first, in the TV's language before English; else a teaser. */
+    private static String trailer(JSONObject videos, String lang) {
+        JSONArray list = videos == null ? null : videos.optJSONArray("results");
+        String best = null;
+        int bestScore = -1;
+        for (int i = 0; list != null && i < list.length(); i++) {
+            JSONObject v = list.optJSONObject(i);
+            if (v == null || !"YouTube".equals(v.optString("site")) || v.optString("key").isEmpty()) continue;
+            String type = v.optString("type");
+            int score = "Trailer".equals(type) ? 4 : "Teaser".equals(type) ? 2 : 0;
+            if (score == 0) continue;
+            if (v.optBoolean("official")) score += 1;
+            if (lang.equals(v.optString("iso_639_1"))) score += 8;
+            if (score > bestScore) {
+                bestScore = score;
+                best = v.optString("key");
+            }
+        }
+        return best;
     }
 
     /** This year's or later: "not streaming yet" (an older one nowhere to stream simply isn't available). */
