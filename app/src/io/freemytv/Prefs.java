@@ -392,6 +392,10 @@ final class Prefs {
     static Set<String> watchHidden() { return new HashSet<>(sp().getStringSet("watchHidden", new HashSet<>())); }
     static void setWatchHidden(Set<String> keys) { putQuietly("watchHidden", keys); }
 
+    /** Explore's titles removed with a held card's menu (Recs.key: "movie:123"): never suggested again. */
+    static Set<String> exploreHidden() { return new HashSet<>(sp().getStringSet("exploreHidden", new HashSet<>())); }
+    static void setExploreHidden(Set<String> keys) { putQuietly("exploreHidden", keys); }
+
     /** Recent Apps: "off" (the default: Android manages memory on its own), "drawer" (a shortcut in the bottom drawer and the
      *  remote's app-switch key) or "home" (those, and pressing Home twice). The top button is its own choice (Top Buttons). */
     static String recents() {

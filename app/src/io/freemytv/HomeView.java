@@ -156,7 +156,9 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private List<Recs.Pick> watchCards = new ArrayList<>();
     private static final String[] TAB_KIND = {null, "movie", "tv"};
     /** Cards in a row: the picks (Recs.MAX_CARDS) or, in the Continue Watching tab, the Watch Next list. */
-    private static final int CARD_MAX = Math.max(Recs.MAX_CARDS, WatchNext.MAX);
+    /** Explore's rows grow as you scroll (6 more as you near the end), up to this many cards. */
+    private static final int EXPLORE_MAX = Recs.EXPLORE_ROW, EXPLORE_STEP = 6;
+    private static final int CARD_MAX = Math.max(EXPLORE_MAX, Math.max(Recs.MAX_CARDS, WatchNext.MAX));
     private static final int Z_TOP = 4, Z_CARDS = 5, Z_WATCH = 6, Z_MUSIC = 7;
 
     private final Activity activity;
@@ -255,6 +257,13 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private boolean menuOpen;
     private int menuIndex;
     private WatchNext.Item menuItem;
+    private Recs.Pick menuPickItem;   // an Explore card's menu: the title it's for (menuItem is then null)
+    // How many cards each Explore tab shows beyond Prefs.cards(), grown as you scroll (movie, tv), and whether more are
+    // being looked up.
+    private final int[] exploreMore = new int[2];
+    private final boolean[] exploreDone = new boolean[2];   // this tab's lookups found nothing more: no more asking
+    private boolean loadingMore;
+    private static final int MORE_AHEAD = 4;   // cards before the end at which the next ones are asked for
     private String menuTitle = "", menuSub = "";
     private float menuOptionsTop;
     private Paint menuTitlePaint, menuSubPaint, menuOptionPaint;
@@ -1197,7 +1206,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         cardsLoading = false;   // the next draw sets it again while a card still waits
         boolean topMoving = step(topFocus, dt) | topReorderFrame, cardsMoving = step(cardFocus, dt) | step(cardOpen, dt) | cardScroll.step(dt)
                 | step(watchFocus, dt) | watchScroll.step(dt) | step(musicFocus, dt);
-        boolean searchMoving = searchShow.step(dt) | searching | hearing;
+        boolean searchMoving = searchShow.step(dt) | searching | hearing | (loadingMore && exploreTab());
         hearShown += (hearLevel - hearShown) * Math.min(1, dt * 12);
         if (searchMoving || searchWasMoving) {
             // The bar grows out of the button (and its ring turns while it searches), the clock and the tabs give way;
@@ -3358,6 +3367,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (next != cardIndex) {
                 cardIndex = next;
                 retarget(false);
+                moreIfNearEnd();
             }
         } else if (zone == Z_WATCH && !watching.isEmpty()) {
             int next = Math.max(0, Math.min(watching.size() - 1, watchIndex + dir));
@@ -4597,10 +4607,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             if (zone == Z_CARDS && list.isEmpty()) zone = Z_SHELF;
             retarget(false);   // the wide card and the scroll follow the clamped index, whatever has the focus
         }
-        // This tab's cards, then the first three of the others (what shows at first): switching tabs is quick, and
-        // the images stay under Recs's cap in memory. Continue Watching can list 12: only the ones near the focus.
+        // This tab's cards near the focus, then the first three of the others (what shows at first): switching tabs is
+        // quick, and the images stay under Recs's cap in memory. Rows that scroll (Continue Watching's 12, Explore's up
+        // to 30) only around the focus: asking for all of a long row overflowed the cap, and as each image's arrival
+        // updates the cards, they were made and dropped in a loop (600 in 45 s).
         if (watchTab()) loadWatchCards();
-        else for (Recs.Pick p : list) recs.backdrop(p);
+        else for (int i = Math.max(0, cardIndex - 2); i < Math.min(list.size(), Math.max(cardIndex + 1 + MORE_AHEAD, Prefs.cards())); i++) recs.backdrop(list.get(i));
         for (int t = 0; t < tabCount(); t++) {
             if (t == tab) continue;
             List<Recs.Pick> other = tabList(t);
@@ -4623,7 +4635,76 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private List<Recs.Pick> tabList(int t) {
         String kind = tabKind(t);
         if (MUSIC_TAB.equals(kind)) return java.util.Collections.emptyList();   // Now Playing: no cards
-        return WATCH_TAB.equals(kind) ? watchCards : recs.now(kind);
+        if (WATCH_TAB.equals(kind)) return watchCards;
+        return exploreKind(kind) ? recs.now(kind, Prefs.cards() + exploreMore[kind.equals("movie") ? 0 : 1]) : recs.now(kind);
+    }
+
+    private static boolean exploreKind(String kind) {
+        return "movie".equals(kind) || "tv".equals(kind);
+    }
+
+    /** An Explore tab is on screen (not search over it). */
+    private boolean exploreTab() {
+        return !searchOpen && picksMode() && exploreKind(tabKind(tab));
+    }
+
+    /**
+     * Near the end of an Explore row (MORE_AHEAD cards before it, so they're there before you are): 6 more. From the
+     * list when it has them, else looked up (Recs.more) and shown when they come, a "Loading more…" card at the row's
+     * end until then.
+     */
+    private void moreIfNearEnd() {
+        if (!exploreTab() || zone != Z_CARDS) return;
+        // The pictures around the focus, before they're needed: 2 behind and 4 ahead (a poster is made with its
+        // backdrop; the backdrop opens the card). Scrolling fast left them turning rings for a few seconds.
+        for (int i = Math.max(0, cardIndex - 2); i < Math.min(cards.size(), cardIndex + 1 + MORE_AHEAD); i++) recs.backdrop(cards.get(i));
+        if (cardIndex < cards.size() - MORE_AHEAD || loadingMore) return;
+        final String kind = tabKind(tab);
+        final int slot = kind.equals("movie") ? 0 : 1, shown = Prefs.cards() + exploreMore[slot];
+        if (shown + EXPLORE_STEP > EXPLORE_MAX || exploreDone[slot]) return;
+        if (recs.now(kind, shown + EXPLORE_STEP).size() > cards.size()) {   // the list has more already
+            exploreMore[slot] += EXPLORE_STEP;
+            updateCards();
+            return;
+        }
+        loadingMore = true;
+        heroDirty = true;
+        wake();
+        SEARCH.execute(() -> {
+            int added = recs.more(kind, EXPLORE_STEP);
+            post(() -> {
+                loadingMore = false;
+                if (added > 0) {
+                    exploreMore[slot] += EXPLORE_STEP;
+                    updateCards();
+                } else {
+                    exploreDone[slot] = true;
+                }
+                heroDirty = true;
+                wake();
+            });
+        });
+    }
+
+    /** At the end of an Explore row while more are being looked up: a card-sized slot with a turning ring. */
+    private void drawLoadingCard(Canvas c, int i) {
+        if (i >= CARD_MAX) return;
+        RectF r = cardRects[i];
+        if (r.left > w || r.right < 0) return;
+        float rr = 18 * k, cx = r.centerX(), cy = r.centerY() - 20 * k;
+        fill.setShader(null);
+        fill.setColor(tone(0x14000000, 0x1AFFFFFF));
+        c.drawRoundRect(r, rr, rr, fill);
+        float sr = 22 * k, turn = (SystemClock.uptimeMillis() % 1000) / 1000f * 360;
+        cardSpinner.setStrokeWidth(4 * k);
+        cardSpinner.setColor(tone(0x66000000, 0x99FFFFFF));
+        tmp.set(cx - sr, cy - sr, cx + sr, cy + sr);
+        c.drawArc(tmp, turn, 270, false, cardSpinner);
+        int a = lCardMeta.getAlpha();
+        lCardMeta.setTextAlign(Paint.Align.CENTER);
+        c.drawText(Ui.tr("Loading more…"), cx, cy + sr + 48 * k, lCardMeta);
+        lCardMeta.setTextAlign(Paint.Align.LEFT);
+        lCardMeta.setAlpha(a);
     }
 
     /** The Continue Watching tab's backdrops near the focus (the cards on screen and the next few). */
@@ -5267,6 +5348,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private boolean canHold() {
         if (sheetOpen || drawerOpen) return false;
+        if (zone == Z_CARDS && exploreTab()) return cardIndex < cards.size();
         if (zone == Z_CARDS && watchTab()) return cardIndex < watching.size();
         return zone == Z_WATCH && continueMode() && watchIndex < watching.size();
     }
@@ -5274,14 +5356,26 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     /** The focused card's menu (held OK, or TalkBack's long click). */
     private void showMenu() {
         if (menuOpen || !canHold() || menuTitlePaint == null) return;
-        menuItem = watching.get(zone == Z_CARDS ? cardIndex : watchIndex);
         float width = (MENU_W - 2 * MENU_PAD) * k;
-        String title = menuItem.title + (menuItem.episode != null ? " · " + menuItem.episode : "");
-        menuTitle = TextUtils.ellipsize(title, new TextPaint(menuTitlePaint), width, TextUtils.TruncateAt.END).toString();
-        menuSub = menuItem.app == null ? "" : TextUtils.ellipsize(menuItem.app, new TextPaint(menuSubPaint), width,
-                TextUtils.TruncateAt.END).toString();
-        menuOptions[0] = Ui.tr("Hide from Continue Watching");
-        menuOptions[1] = Ui.tr("Open the app");
+        if (zone == Z_CARDS && exploreTab()) {   // an Explore card: remove it from the suggestions, or its details
+            menuItem = null;
+            menuPickItem = cards.get(cardIndex);
+            menuTitle = TextUtils.ellipsize(menuPickItem.title, new TextPaint(menuTitlePaint), width, TextUtils.TruncateAt.END).toString();
+            String app = Recs.serviceName(menuPickItem);
+            menuSub = app == null || app.isEmpty() ? "" : TextUtils.ellipsize(app, new TextPaint(menuSubPaint), width,
+                    TextUtils.TruncateAt.END).toString();
+            menuOptions[0] = Ui.tr("Remove this suggestion");
+            menuOptions[1] = Ui.tr("Show details");
+        } else {
+            menuPickItem = null;
+            menuItem = watching.get(zone == Z_CARDS ? cardIndex : watchIndex);
+            String title = menuItem.title + (menuItem.episode != null ? " · " + menuItem.episode : "");
+            menuTitle = TextUtils.ellipsize(title, new TextPaint(menuTitlePaint), width, TextUtils.TruncateAt.END).toString();
+            menuSub = menuItem.app == null ? "" : TextUtils.ellipsize(menuItem.app, new TextPaint(menuSubPaint), width,
+                    TextUtils.TruncateAt.END).toString();
+            menuOptions[0] = Ui.tr("Hide from Continue Watching");
+            menuOptions[1] = Ui.tr("Open the app");
+        }
         menuOptions[2] = Ui.tr("Cancel");
         layoutMenu();
         menuOpen = true;
@@ -5373,8 +5467,24 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     private void pickMenu() {
         WatchNext.Item it = menuItem;
+        Recs.Pick pick = menuPickItem;
         int choice = menuIndex;
         closeMenu(false);
+        if (pick != null) {
+            if (choice == 0) {
+                click.open();
+                removeSuggestion(pick);
+            } else if (choice == 1 && cardIndex < cards.size() && cards.get(cardIndex) == pick) {
+                pickChoose = true;
+                openChoice(pick);
+                heroDirty = true;
+                click.move();
+                wake();
+            } else {
+                click.move();
+            }
+            return;
+        }
         if (it == null) return;
         if (choice == 0) {
             click.open();
@@ -5385,6 +5495,32 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             showToast(Ui.trf("Couldn't open {app}.", "app", appName(it)));
         } else {
             click.move();
+        }
+    }
+
+    /**
+     * An Explore title removed for good (Prefs.exploreHidden): the row closes over it and the next title takes its
+     * place (looked up when the list has no more); the focus stays where it was.
+     */
+    private void removeSuggestion(Recs.Pick p) {
+        Set<String> removed = Prefs.exploreHidden();
+        removed.add(Recs.key(p));
+        Prefs.setExploreHidden(removed);
+        pickChoose = false;
+        int shown = cards.size();
+        updateCards();
+        heroDirty = true;
+        showToast(Ui.trf("Removed {title}. It won't be suggested again.", "title", p.title));
+        if (cards.size() < shown && !loadingMore && exploreTab()) {   // the list ran out: one more to fill its place
+            final String kind = tabKind(tab);
+            loadingMore = true;
+            SEARCH.execute(() -> {
+                recs.more(kind, 1);
+                post(() -> {
+                    loadingMore = false;
+                    updateCards();
+                });
+            });
         }
     }
 
@@ -5627,6 +5763,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         int top = -1;
         int slots = cardSlots;   // the others aren't drawn: at 3, no card peeks in at the right edge
         if (searchUp) slots = Math.min(cards.size(), CARD_MAX);   // all of search's results, in a row that scrolls
+        else if (exploreTab() && cards.size() > cardSlots) slots = Math.min(cards.size(), CARD_MAX);   // grown: it scrolls
         else if (watchTab()) {   // as many as the Watch Next list has (the row scrolls), and no empty cards
             slots = cards.size();
             if (slots == 0 && watchLoaded) {
@@ -5638,6 +5775,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         for (int i = 0; i < slots; i++) if (cardFocus[i].value > 0.02f && (top < 0 || cardFocus[i].value > cardFocus[top].value)) top = i;
         for (int i = 0; i < slots; i++) if (i != top) drawLightCard(c, i);
         if (top >= 0) drawLightCard(c, top);
+        if (loadingMore && exploreTab()) drawLoadingCard(c, cards.size());
         if (HomeData.coinCount() > 0 || playingTab != null) drawQuotes(c);
     }
 
@@ -5751,15 +5889,32 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         shadowDeep.setColor(Ui.alpha(0xFF000000, tone(0.14f, 0.32f) + tone(0.2f, 0.28f) * f));
         shadows.draw(c, tmp, r0, DEEP_BLUR * k, shadowDeep);
         c.restore();
-        Backdrop b = p == null ? null : recs.backdrop(p);
-        Bitmap img = b == null ? null : b.wide;
         Recs.Poster poster = recs.poster(p);
         float open = Ui.clamp(cardOpen[i].value);
+        // A narrow card with its poster asks for no backdrop: only the focused card and the two each side do (the next
+        // to open). Every card on screen asking pushed past the cache's room, and backdrops were made, dropped and made
+        // again (~0.5 s each), so the card you moved to often opened before its own was back.
+        boolean near = Math.abs(i - cardIndex) <= 2 || open > 0.02f;
+        Backdrop b = p == null ? null : poster == null || near ? recs.backdrop(p) : recs.readyBackdrop(p);
+        Bitmap img = b == null ? null : b.wide;
         float shown = 1;
         grayImage = p != null && p.notOn;   // search: a title none of your apps has, in black and white
         if (poster != null) {   // narrow: the poster; as the card widens the backdrop fades in over it
             float back = img == null ? 0 : Ui.clamp((open - 0.1f) / 0.6f);
-            if (back < 0.999f) coverImage(c, poster.bitmap, poster.shader, cell, r, shown);   // not once the backdrop covers it
+            // Opening before its backdrop is ready: the loading look, not the poster stretched across the wide card.
+            float waiting = img == null ? Ui.clamp(open / 0.25f) : 0;
+            if (back < 0.999f && waiting < 0.999f) coverImage(c, poster.bitmap, poster.shader, cell, r, shown * (1 - waiting));
+            if (waiting > 0.001f) {
+                fill.setShader(null);
+                fill.setColor(Ui.alpha(tone(0xFFDADADF, 0xFF2C2C2E), waiting));
+                c.drawRoundRect(cell, r, r, fill);
+                float sr = 22 * k * s, turn = (SystemClock.uptimeMillis() % 1000) / 1000f * 360;
+                cardSpinner.setStrokeWidth(4 * k * s);
+                cardSpinner.setColor(Ui.alpha(tone(0x66000000, 0x99FFFFFF), waiting));
+                tmp.set(cell.centerX() - sr, cell.centerY() - sr, cell.centerX() + sr, cell.centerY() + sr);
+                c.drawArc(tmp, turn, 270, false, cardSpinner);
+                cardsLoading = true;
+            }
             if (back > 0.001f) coverImage(c, img, b.wideShader, cell, r, back * shown);
         } else if (img != null) {
             coverImage(c, img, b.wideShader, cell, r, shown);
@@ -7197,6 +7352,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                     int next = Math.max(0, Math.min(cards.size() - 1, cardIndex + dx));
                     if (next == cardIndex) return true;
                     cardIndex = next;
+                    moreIfNearEnd();
                 } else if (dy < 0) {
                     zone = Z_TOP;
                     topIndex = tab;     // as on Apple TV: moving up to the tabs focuses the selected tab

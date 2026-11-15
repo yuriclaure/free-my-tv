@@ -106,8 +106,11 @@ final class Recs {
     private static final int TRAKT_MAX = MAX_CARDS;
     /** By subscription, with ads (Pluto TV) or free: never rent or buy. */
     private static final String WATCH_TYPES = "flatrate%7Cads%7Cfree";
-    /** Images kept on disk: a backdrop and a poster for every title the list can hold. */
-    private static final int FILES = 3 * (POOL + TRAKT_MAX + WatchNext.MAX);   // original, 1280-wide copy, poster
+    /** An Explore row's most cards (as you scroll: HomeView): past ~30, Rotten Tomatoes' list has run out (28 a kind). */
+    static final int EXPLORE_ROW = 30;
+    /** Images kept on disk: both Explore rows whole (scrolled back over: no download again), Trakt's, Continue
+     *  Watching's and a search's worth; three for each (the original, the 1280-wide copy, the poster). */
+    private static final int FILES = 3 * (2 * EXPLORE_ROW + TRAKT_MAX + WatchNext.MAX + 12);
     /** Pick.mine: what they're in the middle of, and what they'd like (watchlist, Trakt's recommendations). */
     private static final int PROGRESS = 1, LIKED = 2;
     private static final int MANHA = 0, TARDE = 1, NOITE = 2;
@@ -234,7 +237,11 @@ final class Recs {
     private final ExecutorService watchIo = Ui.background(1);
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<Listener> listeners = new ArrayList<>();
-    private final Map<String, Poster> posters = new LinkedHashMap<>();   // narrow-card portraits, same keys as images
+    // Narrow-card portraits (same keys as images), kept apart from the backdrops and longer: a narrow card needs only its
+    // poster (~0.6 MB, against several for a backdrop), so a row scrolled back over shows them at once while the
+    // backdrops (the focused card's) come again from disk. Least recently drawn go first.
+    private final Map<String, Poster> posters = new LinkedHashMap<>(16, 0.75f, true);
+    private static final int POSTERS_KEPT = 40;
     private final Map<String, Backdrop> images = new LinkedHashMap<>(16, 0.75f, true);   // this hour's, built and ready to draw
     private final java.util.Set<String> pending = new java.util.HashSet<>();
     private volatile List<Pick> picks = new ArrayList<>();
@@ -398,12 +405,18 @@ final class Recs {
 
     /** This hour's Prefs.cards(), movies only ("movie") or shows only ("tv"); null = both (the home screen tabs). */
     List<Pick> now(String kind) {
+        return now(kind, Prefs.cards());
+    }
+
+    /** As now(kind), with up to `count` of an Explore tab's (it grows as you scroll: more()). Removed titles never. */
+    List<Pick> now(String kind, int count) {
         List<Pick> out = new ArrayList<>();
         if (!hasKey(context)) return out;    // no TMDB key: no recommendations
+        Set<String> removed = Prefs.exploreHidden();
         List<Pick> progress = new ArrayList<>(), liked = new ArrayList<>(), list = new ArrayList<>();
         Map<String, Boolean> have = new HashMap<>();   // one look per app, not per title (this runs every 15 s)
         for (Pick p : picks) {
-            if ((kind == null || kind.equals(p.kind)) && !p.horror
+            if ((kind == null || kind.equals(p.kind)) && !p.horror && !removed.contains(key(p))
                     && (!p.detailed || (p.pkg != null && have.computeIfAbsent(p.pkg, this::installed)
                     && (p.servicePkg == null || have.computeIfAbsent(p.servicePkg, this::installed))))) {   // app missing or switched off: skip
                 (p.mine == PROGRESS ? progress : p.mine == LIKED ? liked : list).add(p);
@@ -413,7 +426,7 @@ final class Recs {
         // Trakt first: what they're in the middle of (as Trakt orders it), up to 2 in 5 cards, then their watchlist and
         // Trakt's recommendations, up to 3 in 5 with those; then TMDB's. A new set each hour; Trakt's fill the rest when
         // TMDB's run short. Never two from the same franchise ("Law & Order" and "Law & Order: Special…").
-        int cards = Prefs.cards();
+        int cards = kind == null ? Prefs.cards() : Math.max(Prefs.cards(), count);
         java.util.Set<String> seen = new java.util.HashSet<>();
         take(out, seen, progress, 0, Math.max(1, cards * 2 / 5));
         take(out, seen, liked, hour * cards, Math.max(2, cards * 3 / 5));
@@ -545,6 +558,14 @@ final class Recs {
     }
 
     /** The pick's ready backdrop (or null: builds it in the background and notifies when it's ready). */
+    /** The backdrop if it's ready, without asking for it (a narrow card that has its poster). */
+    Backdrop readyBackdrop(Pick p) {
+        if (p == null || p.backdrop == null) return null;
+        synchronized (images) {
+            return images.get(p.backdrop);
+        }
+    }
+
     Backdrop backdrop(Pick p) {
         if (p == null || p.backdrop == null) return null;
         final String key = p.backdrop;    // the details may swap the image midway
@@ -765,6 +786,118 @@ final class Recs {
         return out;
     }
 
+    // more(): this session's Rotten Tomatoes lists, how far into TMDB's trending each kind got, and what was looked at.
+    private final Map<String, List<RtPopular.Title>> rtLists = new HashMap<>();
+    private final Map<String, Integer> trendingPage = new HashMap<>(), discoverPage = new HashMap<>();
+    private final Set<String> tried = new HashSet<>();
+
+    /**
+     * More of an Explore tab's titles, `want` of them at the end of the list (as you scroll to its end): further down
+     * Rotten Tomatoes' popular list, then TMDB's weekly trending (pages 1 to 5, titles with 100 votes or more), then
+     * what's most popular on the TV's own services (TMDB's discover, as the list's new releases, pages 1 to 10: most of
+     * trending is still in cinemas); each on one of the TV's apps, not horror, not removed, not there already. Saved
+     * with the list (until it's made again).
+     * Network: off the UI thread. How many were added.
+     */
+    synchronized int more(String kind, int want) {
+        if (!hasKey(context)) return 0;
+        Set<String> removed = Prefs.exploreHidden(), have = new HashSet<>(), names = new HashSet<>();
+        for (Pick p : picks) {
+            have.add(key(p));
+            names.add(titleKey(p.title));
+        }
+        List<Pick> added = new ArrayList<>();
+        try {
+            List<RtPopular.Title> rt = rtLists.get(kind);
+            if (rt == null) {
+                try {
+                    rt = RtPopular.fetch(kind);
+                } catch (Exception e) {
+                    rt = new ArrayList<>();
+                }
+                rtLists.put(kind, rt);
+            }
+            for (RtPopular.Title t : rt) {
+                if (added.size() >= want) break;
+                if (names.contains(titleKey(t.title)) || !tried.add("rt:" + kind + ":" + titleKey(t.title))) continue;
+                Pick pick = match(kind, t);
+                if (pick == null || have.contains(key(pick)) || removed.contains(key(pick))) continue;
+                pick.audience = t.audience;
+                try {
+                    fetchDetails(pick);
+                } catch (Exception e) {
+                    continue;
+                }
+                if (pick.pkg != null && !pick.horror && have.add(key(pick))) added.add(pick);
+            }
+            int page = trendingPage.containsKey(kind) ? trendingPage.get(kind) : 1;
+            while (added.size() < want && page <= 5) {
+                JSONArray trending = get("/trending/" + kind + "/week?language=" + lang() + "&page=" + page).getJSONArray("results");
+                List<Pick> candidates = new ArrayList<>();
+                for (int i = 0; i < trending.length(); i++) {
+                    if (trending.getJSONObject(i).optInt("vote_count") >= 100) add(candidates, trending.getJSONObject(i), kind);
+                }
+                for (Pick pick : candidates) {
+                    if (added.size() >= want) break;
+                    if (have.contains(key(pick)) || removed.contains(key(pick)) || !tried.add(key(pick))) continue;
+                    try {
+                        fetchDetails(pick);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    if (pick.pkg != null && !pick.horror && have.add(key(pick))) added.add(pick);
+                }
+                if (added.size() < want) page++;
+            }
+            trendingPage.put(kind, page);
+            String common = cache.getString("discover", null);
+            if (common == null) {   // a list made before this was saved: the TV's services, as the list finds them
+                JSONArray providers = get("/watch/providers/movie?language=" + lang() + "&watch_region=" + REGION).getJSONArray("results");
+                StringBuilder ids = new StringBuilder();
+                for (int i = 0; i < providers.length(); i++) {
+                    JSONObject o = providers.getJSONObject(i);
+                    String[] svc = service(o.optString("provider_name"), o.optInt("provider_id"));
+                    if (svc != null && installed(svc[2]) && !Prefs.serviceOff(svc[1])) ids.append(ids.length() == 0 ? "" : "|").append(o.optInt("provider_id"));
+                }
+                if (ids.length() > 0) {
+                    common = "&language=" + lang() + "&watch_region=" + REGION + "&with_watch_monetization_types=" + WATCH_TYPES + "&include_adult=false"
+                            + "&sort_by=popularity.desc&with_watch_providers=" + URLEncoder.encode(ids.toString(), "UTF-8")
+                            + (Prefs.hideAnimation() ? "&without_genres=" + ANIMATION : "");
+                    cache.edit().putString("discover", common).apply();
+                }
+            }
+            int dpage = discoverPage.containsKey(kind) ? discoverPage.get(kind) : 1;
+            while (common != null && added.size() < want && dpage <= 10) {
+                JSONArray found = get("/discover/" + kind + "?vote_count.gte=" + (kind.equals("movie") ? 30 : 20) + "&page=" + dpage + common)
+                        .getJSONArray("results");
+                List<Pick> candidates = new ArrayList<>();
+                for (int i = 0; i < found.length(); i++) add(candidates, found.getJSONObject(i), kind);
+                for (Pick pick : candidates) {
+                    if (added.size() >= want) break;
+                    if (have.contains(key(pick)) || removed.contains(key(pick)) || !tried.add(key(pick))) continue;
+                    try {
+                        fetchDetails(pick);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    if (pick.pkg != null && !pick.horror && have.add(key(pick))) added.add(pick);
+                }
+                if (added.size() < want) dpage++;
+            }
+            discoverPage.put(kind, dpage);
+        } catch (Exception e) {
+            AppLog.w("explore more: " + e.getMessage());
+        }
+        AppLog.w("explore: " + added.size() + " more " + kind + (added.size() < want ? " (no more found)" : ""));
+        if (!added.isEmpty()) {
+            List<Pick> list = new ArrayList<>(picks);
+            list.addAll(added);
+            picks = list;
+            save();
+        }
+        return added.size();
+    }
+
     /** Movies and shows are numbered separately on TMDB: a pick is identified by type + number. */
     static String key(Pick p) {
         return p.kind + ":" + p.id;
@@ -831,6 +964,7 @@ final class Recs {
         String common = "&language=" + lang() + "&watch_region=" + REGION + "&with_watch_monetization_types=" + WATCH_TYPES + "&include_adult=false"
                 + "&sort_by=popularity.desc&with_watch_providers=" + URLEncoder.encode(ids.toString(), "UTF-8")
                 + (Prefs.hideAnimation() ? "&without_genres=" + ANIMATION : "");
+        cache.edit().putString("discover", common).apply();   // more(): the same services, further down their popular titles
         // 1. What's popular now: Rotten Tomatoes' list of titles people look up on its site this week, among those Fresh
         //    with critics and liked by audiences, in its order, only what's on one of the TV's services and no horror.
         //    TMDB's own trending counts visits to its pages, which a service's promotion drives up (a new original
@@ -1150,6 +1284,7 @@ final class Recs {
             p.extraAsked = false;   // asked again the next time it's opened
         }
         p.extraDone = true;
+        if (p.overview != null && picks.contains(p)) save();   // kept with the list: not asked again after a restart
     }
 
     /** The best trailer on YouTube: an official trailer first, in the TV's language before English; else a teaser. */
@@ -1848,7 +1983,7 @@ final class Recs {
                 images.put(p.backdrop, backdrop);
                 if (poster != null) posters.put(p.backdrop, poster);
                 while (images.size() > (forLight ? Prefs.cards() + 7 + WATCH_READY : 4)) images.remove(images.keySet().iterator().next());
-                posters.keySet().retainAll(images.keySet());
+                while (posters.size() > POSTERS_KEPT) posters.remove(posters.keySet().iterator().next());
             }
             notifyListeners();
         }
@@ -2109,6 +2244,14 @@ final class Recs {
                         .put("servicePkg", p.servicePkg == null ? "" : p.servicePkg)
                         .put("tag", p.tag == null ? "" : p.tag).put("mine", p.mine).put("detailed", p.detailed)
                         .put("logo", p.logo == null ? "" : p.logo).put("horror", p.horror).put("audience", p.audience));
+                if (p.extraDone && p.overview != null) {   // its details (an opened card's): there at once after a restart
+                    JSONObject o = a.getJSONObject(a.length() - 1).put("overview", p.overview).put("trailer", p.trailer == null ? "" : p.trailer);
+                    if (p.apps != null) {
+                        JSONArray apps = new JSONArray();
+                        for (String[] app : p.apps) apps.put(new JSONArray().put(app[0]).put(app[1]).put(app[2]));
+                        o.put("apps", apps);
+                    }
+                }
             }
             SharedPreferences.Editor e = cache.edit().putString("picks", a.toString()).putInt("period", period).putLong("listAt", listAt)
                     .putString("traktActivity", traktActivity).putLong("traktStamp", traktStamp)
@@ -2146,6 +2289,19 @@ final class Recs {
             p.logo = o.optString("logo").isEmpty() ? null : o.optString("logo");
             p.horror = o.optBoolean("horror");
             p.audience = o.optInt("audience", -1);
+            if (o.has("overview")) {
+                p.overview = o.optString("overview");
+                p.trailer = o.optString("trailer").isEmpty() ? null : o.optString("trailer");
+                JSONArray apps = o.optJSONArray("apps");
+                if (apps != null) {
+                    p.apps = new ArrayList<>();
+                    for (int j = 0; j < apps.length(); j++) {
+                        JSONArray app = apps.optJSONArray(j);
+                        if (app != null && app.length() == 3) p.apps.add(new String[] {app.optString(0), app.optString(1), app.optString(2)});
+                    }
+                }
+                p.extraAsked = p.extraDone = true;
+            }
             out.add(p);
         }
         return out;
